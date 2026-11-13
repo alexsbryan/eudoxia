@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `eudoxia::Ready<'scope, G, C>` in the current scope
+ --> tests/ui/fail/clone_ready.rs:9:26
+  |
+9 |     let _another = ready.clone();
+  |                          ^^^^^ method not found in `eudoxia::Ready<'_, G>`

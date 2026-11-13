@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail/different_action.rs:7:18
+  |
+7 |     live.execute(ready).unwrap();
+  |          ------- ^^^^^ expected `Ready<'_, Store<Write>>`, found `Ready<'_, Store<Read>>`
+  |          |
+  |          arguments to this method are incorrect
+  |
+  = note: expected struct `eudoxia::Ready<'_, support::Store<support::Write>>`
+             found struct `eudoxia::Ready<'scope, support::Store<support::Read>>`
+note: method defined here
+ --> src/scaffold.rs
+  |
+  |     pub fn execute(
+  |            ^^^^^^^

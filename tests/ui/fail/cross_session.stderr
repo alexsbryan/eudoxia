@@ -1,0 +1,29 @@
+error[E0521]: borrowed data escapes outside of closure
+  --> tests/ui/fail/cross_session.rs:12:13
+   |
+ 8 |         let proof = live
+   |             ----- `proof` declared here, outside of the closure body
+...
+11 |         with_resource(second, |other| {
+   |                                ----- `other` is a reference that is only valid in the closure body
+12 |             other.prepare(proof).unwrap();
+   |             ^^^^^^^^^^^^^^^^^^^^ `other` escapes the closure body here
+   |
+   = note: requirement occurs because of the type `Justification<'_, support::Store<support::Read>>`, which makes the generic argument `'_` invariant
+   = note: the struct `Justification<'scope, G, C>` is invariant over the parameter `'scope`
+   = help: see <https://doc.rust-lang.org/nomicon/subtyping.html> for more information about variance
+
+error[E0521]: borrowed data escapes outside of closure
+  --> tests/ui/fail/cross_session.rs:12:13
+   |
+ 7 |     with_resource(first, |live| {
+   |                           ----
+   |                           |
+   |                           `live` is a reference that is only valid in the closure body
+   |                           has type `&mut eudoxia::Live<'1, support::Store<support::Read>>`
+...
+12 |             other.prepare(proof).unwrap();
+   |             ^^^^^^^^^^^^^^^^^^^^
+   |             |
+   |             `live` escapes the closure body here
+   |             argument requires that `'1` must outlive `'static`

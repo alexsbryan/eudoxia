@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `eudoxia::Lease<G, C>` in the current scope
+ --> tests/ui/fail/clone_lease.rs:6:19
+  |
+6 |     let _ = lease.clone();
+  |                   ^^^^^ method not found in `eudoxia::Lease<support::Store<support::Read>>`

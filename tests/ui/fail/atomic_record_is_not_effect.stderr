@@ -1,0 +1,16 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail/atomic_record_is_not_effect.rs:9:9
+  |
+4 |     atomic(
+  |     ------ arguments to this function are incorrect
+...
+9 |         record,
+  |         ^^^^^^ expected `Effect<()>`, found `DecisionRecord`
+  |
+  = note: expected struct `eudoxia::Effect<()>`
+             found struct `eudoxia::DecisionRecord`
+note: function defined here
+ --> src/atomic.rs
+  |
+  | pub fn atomic<S, A, F, C, T>(
+  |        ^^^^^^

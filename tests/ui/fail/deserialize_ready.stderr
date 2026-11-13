@@ -1,0 +1,5 @@
+error[E0599]: no function or associated item named `deserialize` found for struct `eudoxia::Ready<'scope, G, C>` in the current scope
+  --> tests/ui/fail/deserialize_ready.rs:11:12
+   |
+11 |     Ready::deserialize(decoder)
+   |            ^^^^^^^^^^^ function or associated item not found in `eudoxia::Ready<'_, _, _>`

@@ -1,0 +1,5 @@
+error[E0616]: field `identity` of struct `eudoxia::ApplicationAuthority` is private
+ --> tests/ui/fail/identity_cache.rs:9:9
+  |
+9 |     app.identity = AuthorityId::from_bytes([0; 32]);
+  |         ^^^^^^^^ private field

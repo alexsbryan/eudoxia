@@ -1,0 +1,29 @@
+error[E0599]: the method `through_legacy_constructor` exists for struct `eudoxia::Application`, but its trait bounds were not satisfied
+  --> tests/ui/fail/implicit_identity_downgrade.rs:20:17
+   |
+20 |       let _ = app.through_legacy_constructor();
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^ method cannot be called on `eudoxia::Application` due to unsatisfied trait bounds
+   |
+  ::: src/identity.rs
+   |
+   | /         pub struct $ty {
+   | |             value: Named<$native>,
+   | |         }
+   | |_________- doesn't satisfy `eudoxia::Application: Into<String>` or `eudoxia::Application: LegacyInput`
+   |
+note: the following trait bounds were not satisfied:
+      `&eudoxia::Application: Into<String>`
+      `&mut eudoxia::Application: Into<String>`
+      `eudoxia::Application: Into<String>`
+  --> tests/ui/fail/implicit_identity_downgrade.rs:8:9
+   |
+ 8 | impl<T: Into<String>> LegacyInput for T {
+   |         ^^^^^^^^^^^^  -----------     -
+   |         |
+   |         unsatisfied trait bound introduced here
+   = help: items from traits can only be used if the trait is implemented and in scope
+note: `LegacyInput` defines an item `through_legacy_constructor`, perhaps you need to implement it
+  --> tests/ui/fail/implicit_identity_downgrade.rs:5:1
+   |
+ 5 | trait LegacyInput: Sized {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^

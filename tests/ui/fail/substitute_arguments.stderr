@@ -1,0 +1,16 @@
+error[E0061]: this method takes 1 argument but 2 arguments were supplied
+  --> tests/ui/fail/substitute_arguments.rs:11:10
+   |
+11 |     live.execute(ready, another).unwrap();
+   |          ^^^^^^^        ------- unexpected argument #2 of type `eudoxia::Effect<support::Read>`
+   |
+note: method defined here
+  --> src/scaffold.rs
+   |
+   |     pub fn execute(
+   |            ^^^^^^^
+help: remove the extra argument
+   |
+11 -     live.execute(ready, another).unwrap();
+11 +     live.execute(ready).unwrap();
+   |

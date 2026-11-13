@@ -1,0 +1,15 @@
+error[E0382]: use of moved value: `lease`
+ --> tests/ui/fail/lease_is_linear.rs:7:5
+  |
+5 | fn reuse(lease: Lease<Store<Read>>) {
+  |          ----- move occurs because `lease` has type `eudoxia::Lease<support::Store<support::Read>>`, which does not implement the `Copy` trait
+6 |     lease.stop();
+  |           ------ `lease` moved due to this method call
+7 |     lease.stop();
+  |     ^^^^^ value used here after move
+  |
+note: `eudoxia::Lease::<G, C>::stop` takes ownership of the receiver `self`, which moves `lease`
+ --> src/scaffold.rs
+  |
+  |     pub fn stop(self) {}
+  |                 ^^^^

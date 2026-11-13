@@ -1,0 +1,18 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail/foreign_guard_authorization.rs:10:17
+   |
+ 6 | fn substitute<G: ResourceGuard<Action = Read, Witness = Reservation>>(
+   |               - found this type parameter
+...
+10 |     real.commit(another_guard).unwrap();
+   |          ------ ^^^^^^^^^^^^^ expected `Authorized<'_, Store<Read>>`, found `Authorized<'_, G>`
+   |          |
+   |          arguments to this method are incorrect
+   |
+   = note: expected struct `eudoxia::Authorized<'_, support::Store<support::Read>>`
+              found struct `eudoxia::Authorized<'_, G>`
+note: method defined here
+  --> src/scaffold.rs
+   |
+   |     fn commit(&mut self, authorized: Authorized<'_, Self, C>) -> Result<Self::Output, Self::Error>;
+   |        ^^^^^^

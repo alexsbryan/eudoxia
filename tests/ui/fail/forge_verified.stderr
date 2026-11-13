@@ -1,0 +1,5 @@
+error[E0451]: field `statement` of struct `eudoxia::VerifiedStatement` is private
+ --> tests/ui/fail/forge_verified.rs:4:25
+  |
+4 |     VerifiedStatement { statement }
+  |                         ^^^^^^^^^ private field

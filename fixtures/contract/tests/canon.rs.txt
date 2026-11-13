@@ -1,0 +1,80 @@
+mod common;
+use common::*;
+use canon_core::{Act, ActKind, Effect, Governs, Log, Pull, Ratify, Scope};
+use canon_institution::Arrangements;
+use eudoxia::{canon::{self, Binding, Identity}, *};
+
+const ADA: &str = "human:stable-ada";
+const BO: &str = "human:stable-bo";
+const CLAIMANT: &str = "human:stable-claimant";
+
+fn scope() -> Scope { Scope::new("house").unwrap() }
+fn seat(holder: &str, at: i64, actor: &str) -> Act {
+    Act::new(ActKind::Grant { holder: holder.into(), scope: scope(), horizon: None, rationale: "explicit seat".into() }, at, actor)
+}
+fn initial() -> (Vec<Act>, Arrangements) {
+    let acts = vec![
+        seat(ADA, 10, "human:founder"), seat(BO, 11, "human:founder"),
+        Act::new(ActKind::Ratification { text: "Both owners approve authority changes".into(), rule: Ratify::Joint { holders: vec![ADA.into(), BO.into()] }, scope: Some(scope()), governs: Some(Governs::All), personal: None }, 12, ADA),
+    ];
+    let arrangements = Arrangements { boundary: 12, effects: acts.iter().map(|a| Effect { source: a.id.clone(), effective_at: a.ts_unix }).collect(), pending: vec![] };
+    (acts, arrangements)
+}
+fn bindings() -> Vec<Binding> {
+    policies().into_iter().map(|p| Binding { owner: p.owner, scope: Scope::new("house.library").unwrap(), terms: p.terms, obligations: p.obligations }).collect()
+}
+fn identities() -> Vec<Identity> {
+    vec![Identity { actor: ADA.into(), key: principal(1) }, Identity { actor: BO.into(), key: principal(5) }, Identity { actor: CLAIMANT.into(), key: principal(6) }]
+}
+fn vote(about: &Act, actor: &str, at: i64) -> Act {
+    Act::new(ActKind::Position { about: about.id.to_string(), citing: None, pull: Pull::Toward, because: "approve this exact grant".into() }, at, actor)
+}
+
+#[test]
+fn an_explicit_canon_established_basis_permits_a_real_signed_exercise() {
+    let (acts, arrangements) = initial();
+    let basis = canon::establish(&Log::from_acts(acts), &arrangements, 30, id("canon-house-v1"), bindings(), &identities()).unwrap();
+    assert_eq!(judge(&basis, &exercise(), &evidence()).decision, Decision::Permitted);
+    assert_eq!(basis.owners().len(), 2);
+    assert!(basis.owners().iter().all(|o| o.issuers.contains(&principal(1)) && o.issuers.contains(&principal(5))));
+}
+
+#[test]
+fn a_grant_cannot_supply_its_own_adoption_and_authorized_assent_is_the_control() {
+    let (mut acts, arrangements) = initial();
+    let proposed = seat(CLAIMANT, 20, "agent:requester");
+    acts.extend([proposed.clone(), vote(&proposed, CLAIMANT, 21)]);
+    let before = canon::establish(&Log::from_acts(acts.clone()), &arrangements, 22, id("canon-house-v1"), bindings(), &identities()).unwrap();
+    assert!(before.owners().iter().all(|o| !o.issuers.contains(&principal(6))));
+    let proof = Evidence::new(["person", "lender"].map(|name| (owner(name), OwnerEvidence::Chain(chain(name, 6))))).unwrap();
+    assert_eq!(judge(&before, &exercise(), &proof).decision, Decision::Refused);
+    acts.extend([vote(&proposed, ADA, 23), vote(&proposed, BO, 24)]);
+    let after = canon::establish(&Log::from_acts(acts), &arrangements, 30, id("canon-house-v1"), bindings(), &identities()).unwrap();
+    assert!(after.owners().iter().all(|o| o.issuers.contains(&principal(6))));
+    assert_eq!(judge(&after, &exercise(), &proof).decision, Decision::Permitted);
+    assert_ne!(before.fingerprint(), after.fingerprint());
+}
+
+#[test]
+fn a_new_effect_does_not_take_authority_before_canon_admits_it() {
+    let (mut acts, arrangements) = initial();
+    let proposed = seat(CLAIMANT, 20, "agent:requester");
+    acts.extend([proposed.clone(), vote(&proposed, ADA, 23), vote(&proposed, BO, 24)]);
+    for (at, held) in [(22, false), (23, false), (24, true), (30, true)] {
+        let b = canon::establish(&Log::from_acts(acts.clone()), &arrangements, at, id("canon-house-v1"), bindings(), &identities()).unwrap();
+        assert_eq!(b.owners()[0].issuers.contains(&principal(6)), held, "at {at}");
+    }
+}
+
+#[test]
+fn a_withdrawal_changes_live_authority_without_rewriting_the_past_record() {
+    let (mut acts, arrangements) = initial();
+    let old = canon::establish(&Log::from_acts(acts.clone()), &arrangements, 30, id("canon-house-v1"), bindings(), &identities()).unwrap();
+    let recorded = judge(&old, &exercise(), &evidence());
+    assert_eq!(recorded.decision, Decision::Permitted);
+    acts.push(Act::new(ActKind::Withdraw { holder: ADA.into(), scope: scope(), rationale: "resign my own seat".into() }, 40, ADA));
+    let current = canon::establish(&Log::from_acts(acts), &arrangements, 50, id("canon-house-v1"), bindings(), &identities()).unwrap();
+    assert_eq!(judge(&current, &exercise(), &evidence()).decision, Decision::Refused);
+    assert_eq!(recorded.replay(&old, &evidence()).unwrap(), recorded);
+    assert_eq!(recorded.replay(&current, &evidence()), Err(ReplayError::ContextChanged));
+}

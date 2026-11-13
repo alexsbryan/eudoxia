@@ -1,0 +1,5 @@
+error[E0616]: field `class` of struct `eudoxia::ApplicationAuthority` is private
+ --> tests/ui/fail/identity_class.rs:9:9
+  |
+9 |     app.class = ApplicationClass::Connector;
+  |         ^^^^^ private field

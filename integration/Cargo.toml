@@ -1,0 +1,17 @@
+[package]
+name = "eudoxia-native-acceptance"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dev-dependencies]
+eudoxia = { path = ".." }
+svrngs-core = { path = "../../svrngs/crates/svrngs-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+ed25519-dalek = "2"
+tracing = "0.1"
+thiserror = "2"

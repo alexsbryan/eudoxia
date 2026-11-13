@@ -1,0 +1,14 @@
+error: lifetime may not live long enough
+  --> tests/ui/fail/escape_scope.rs:15:9
+   |
+11 |     with_resource(store, |live| {
+   |                           ----- return type of closure is eudoxia::Ready<'2, support::Store<support::Read>>
+   |                           |
+   |                           has type `&mut eudoxia::Live<'1, support::Store<support::Read>>`
+...
+15 |         live.prepare(proof).unwrap()
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ returning this value requires that `'1` must outlive `'2`
+   |
+   = note: requirement occurs because of the type `eudoxia::Ready<'_, support::Store<support::Read>>`, which makes the generic argument `'_` invariant
+   = note: the struct `eudoxia::Ready<'scope, G, C>` is invariant over the parameter `'scope`
+   = help: see <https://doc.rust-lang.org/nomicon/subtyping.html> for more information about variance

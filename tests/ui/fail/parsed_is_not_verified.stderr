@@ -1,0 +1,7 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail/parsed_is_not_verified.rs:4:5
+  |
+3 | fn skip_verification(parsed: ParsedStatement) -> VerifiedStatement {
+  |                                                  ----------------- expected `eudoxia::VerifiedStatement` because of return type
+4 |     parsed
+  |     ^^^^^^ expected `VerifiedStatement`, found `ParsedStatement`

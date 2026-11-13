@@ -1,0 +1,32 @@
+[package]
+name = "eudoxia"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "AGPL-3.0-or-later"
+description = "Explicit authority, attenuated delegation, and replayable judgments. Pure Rust."
+
+[features]
+default = []
+canon = ["dep:canon-core", "dep:canon-institution"]
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
+canon-core = { git = "https://github.com/alexsbryan/canon", rev = "967500344209a2cdfb79237052c9c94ffeb8a7a7", optional = true }
+canon-institution = { git = "https://github.com/alexsbryan/canon", rev = "967500344209a2cdfb79237052c9c94ffeb8a7a7", optional = true }
+
+[dev-dependencies]
+trybuild = "1"
+
+[[test]]
+name = "canon"
+required-features = ["canon"]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"

@@ -1,0 +1,25 @@
+error[E0277]: the trait bound `eudoxia::Basis: ResourceGuard<_>` is not satisfied
+ --> tests/ui/fail/historical_basis_is_not_a_guard.rs:4:19
+  |
+4 |     with_resource(basis, |_live| ()).unwrap();
+  |     ------------- ^^^^^ the trait `ResourceGuard<_>` is not implemented for `eudoxia::Basis`
+  |     |
+  |     required by a bound introduced by this call
+  |
+note: required by a bound in `eudoxia::with_resource`
+ --> src/scaffold.rs
+  |
+  | pub fn with_resource<G: ResourceGuard<C>, C: AuthorityContext, T>(
+  |                         ^^^^^^^^^^^^^^^^ required by this bound in `with_resource`
+
+error[E0277]: the trait bound `eudoxia::Basis: ResourceGuard<_>` is not satisfied
+ --> tests/ui/fail/historical_basis_is_not_a_guard.rs:4:27
+  |
+4 |     with_resource(basis, |_live| ()).unwrap();
+  |                           ^^^^^ the trait `ResourceGuard<_>` is not implemented for `eudoxia::Basis`
+  |
+note: required by a bound in `eudoxia::Live`
+ --> src/scaffold.rs
+  |
+  | pub struct Live<'scope, G: ResourceGuard<C>, C: AuthorityContext = Exercise> {
+  |                            ^^^^^^^^^^^^^^^^ required by this bound in `Live`

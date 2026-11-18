@@ -220,48 +220,61 @@ native source interpreter complete. Those remain explicit integration obligation
 
 ### P10. A shared app database's sets end alike on every copy
 
-Model: each device signs change sets at `seq` 0, 1, 2, … in a merged app
-database. A copy holds a record R and a set Φ of fences, each fence
-`(by, d, mark)`. Premise: what the rules read of R is cumulative as R grows.
-That is a key's binding to a person and device kind, and a Remove that took a
-key. The rules never read standing now. A copy applies a taken set, drops a
-refused one for good, and holds one that waits (`community/src/db.rs`).
+Model: each device signs change sets in a merged app database. A copy holds a
+record R and merges each set it takes into its state by a join: commutative,
+associative and idempotent. A carrier may prune a set once every value it
+wrote is overwritten. Premise: what the rules read of R is cumulative as R
+grows. That is a key's binding to a person, and a Remove that took a key; and
+once R holds the Remove of every key it binds to a person, it binds that person
+no other key. The rules never read standing now. A copy applies a taken set,
+drops a refused one for good, holds one that waits, and takes back nothing it
+applied (`community/src/db.rs`).
+
+*A device's sets.* A set signed by d is taken iff R binds d, whether or not R
+holds d's Remove, and every owned row it changes takes it. It waits while R
+binds d to nobody.
 
 *Owned rows.* A change to a row whose key's first value is v is taken iff R
 binds the signer to the person whose key is v, as TEXT of exactly its bytes,
 or the change is a delete and R holds a Remove for every key it binds to that
 person. It is refused iff v is not such text, or R binds the signer to
-another person and the change is a write. Otherwise it waits. Each input that
-decides taken or refused is cumulative under the premise, so every taken or
-refused verdict is final as R grows.
+another person and the change is a write. Otherwise it waits.
 
-*A removed device's sets.* Let C(R, Φ, d) be the fences in Φ for d whose
-signer R binds as a computer, where R holds d's Remove. The cut is
-m = min{mark(f) : f ∈ C}, with none below every seq. A set (d, s) is taken
-iff R holds no Remove of d, or s ≤ m. It is refused iff s > m. It waits while
-R binds d to nobody, or C is empty.
+1. **Verdicts are final.** Each input that decides taken or refused is
+   cumulative under the premise, so neither verdict changes as R grows. A set
+   that waits is held, never applied, until R brings what it lacks; then it is
+   taken or refused for good. No rule refuses a set it once took.
+2. **Order.** A verdict reads only R and the set. Copies that come to hold
+   the same R and the same sets have taken the same sets, in whatever order
+   they arrived.
+3. **Convergence.** A copy takes nothing back, so its state is the join of
+   every set it has taken. A join does not depend on order, so copies that
+   took the same sets hold the same state.
+4. **Pruning is safe.** A set whose every value is overwritten is dominated:
+   the join with it equals the join without it. No set ever leaves the join,
+   so a pruned set is never needed again.
 
-1. **Order.** The verdict reads only (R, Φ, s). A minimum over a set does not
-   depend on the order its members arrived in.
-2. **Refusals are final.** Under the premise, C only grows as R and Φ grow.
-   A minimum over a growing set never rises, so s > m stays true. A copy that
-   dropped a refused set never needs it again.
-3. **Convergence.** Copies that come to hold the same R and Φ have the same m.
-   A copy applied too much only if it applied some s > m. That copy rebuilds
-   from a source that applied nothing past m, and then it holds exactly the
-   sets every copy takes.
+*Why no rule undoes a set.* A rule that refused a removed device's sets past
+some cut would refuse sets some copies had already taken. Taking would not be
+final, and those copies would undo. An undo rebuilds from the sets beneath
+the undone one, and pruning has dropped some of them: a write overwritten and
+then pruned, whose replacement a later cut undoes, is lost. Every copy loses
+it alike, so agreement does not reveal the loss. A cut placed by any computer
+the record binds could also be placed by one already removed.
 
-Taking a set is not final: a lower fence can arrive later and force a
-rebuild. No rule over unbounded fences makes both verdicts final. The
-maximum makes taking final, but then a refusal is never final, and any one
-fencer could let in sets past the cut. The minimum fails closed: a fencer
-can only refuse more of a removed device's sets. Choosing it costs
-availability, never integrity. A fence that names a device R holds no Remove
-of waits. So no fence reaches a device that stands.
+*The cost.* A removed device's sets count if they reach any copy: those it
+made in the window before its removal arrives, and any a member relays on
+purpose. Their values stand until someone writes over them. Stopping a
+removed device is its transport's, which is the embedding's. The group can
+delete a removed person's owned rows by the delete rule above, and any member
+may change a shared row.
 
-Limit: the record's own disputed cases, such as a fork that takes a binding
-or a cut back, fall outside the premise. They are settled by P5/P6, not
-here.
+Classification: proved in the stated model. The premise is an implementation
+obligation on the record. Its last clause matters to the delete rule alone: a
+key bound to a person after R holds the Remove of all their others would turn
+a delete of their row taken earlier. The record's own disputed cases, such as
+a fork that takes a binding or a cut back, fall outside the premise. They are
+settled by P5/P6, not here.
 
 ## 3. Analytic limits and the choices they force
 
@@ -476,7 +489,7 @@ The acceptance behaviors are listed in `CONTRACT.md`.
 | Selected code and acceptance | P4/P5/P6 plus application activation/acceptance ownership and immutable selected content |
 | Records and reports | P3/P4 and caller-scoped rendering; a report is not a proof constructor |
 | Read-grant history versus delegated writes | I1 first forces the private-authority/scope/availability choice; the selected protocol must then preserve P1–P7 |
-| An app database's owned rows and a removed device's sets | P10 plus the carrier's correspondence: it judges every change row and set it applies, it keeps its fences through a rebuild, and it resends only from a copy within the cut |
+| An app database's owned rows and a removed device's sets | P10 plus the carrier's correspondence: it judges every set and each owned row it changes before applying it, applies a taken set once and takes none back, holds one that waits, and stops a removed device at its transport |
 
 ## 5. Assurance and the next feature
 

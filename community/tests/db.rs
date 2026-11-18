@@ -1,8 +1,9 @@
-//! Laws of an app's shared database: an owned row changes only by its
-//! person's devices; a removed person's rows take deletes from any member;
-//! a removed device's sets count up to its lowest fence, the same on every
-//! copy in any order of arrival. Each law names the plant it went red on.
-use eudoxia_community::db::{self, Change, Cut, Fence, Key, Lacks, Type, Verdict, Why};
+//! Laws of an app's shared database: a set counts once the record binds its
+//! signer, removed or not; an owned row changes only by its person's
+//! devices; a removed person's rows take deletes from any member; and no
+//! verdict a copy acted on ever turns, so every order of arrival ends alike.
+//! Each law names the plant it went red on.
+use eudoxia_community::db::{self, Change, Key, Lacks, Type, Verdict, Why};
 use eudoxia_community::{
     Act, Community, Evidence, Facts, Roots, SourceMember, Statement, Vocabulary,
 };
@@ -26,6 +27,7 @@ const PRIYA_PHONE: &str = "priya-phone";
 const SAM: &str = "sam";
 const SAM_PHONE: &str = "sam-phone";
 const TIA: &str = "tia";
+const UMA: &str = "uma";
 
 /// A house: the keeper's computer; Priya and Sam each with a computer and
 /// a phone; Tia with a computer. Each person's key is their computer's.
@@ -79,16 +81,40 @@ fn record(removes: &[(&str, &str)]) -> Facts<V> {
     facts
 }
 
-/// A fence of Priya's phone, by `by`, at `mark`.
-fn phone_fence(by: &'static str, mark: Option<u64>) -> Fence<'static> {
-    let device = PRIYA_PHONE;
-    Fence { by, device, mark }
+/// The keeper's Removes of these keys.
+fn removed(keys: &[&'static str]) -> Facts<V> {
+    let removes: Vec<_> = keys.iter().map(|key| (KEEPER, *key)).collect();
+    record(&removes)
+}
+
+/// Every subset of `keys`, the one at index `mask` holding each key whose
+/// bit is set.
+fn subsets(keys: &[&'static str]) -> Vec<Vec<&'static str>> {
+    let held = |mask: usize| (0..keys.len()).filter(move |i| mask & (1 << i) != 0);
+    let named = |mask| held(mask).map(|i| keys[i]).collect();
+    (0..1 << keys.len()).map(named).collect()
 }
 
 fn text(key: &str) -> Key<'_> {
     Key {
         kind: Type::Text,
         bytes: key.as_bytes(),
+    }
+}
+
+/// One change set as the carrier reads it: its signer and the owned rows
+/// it changes, each `(person_key, change)`; its shared rows ask nothing.
+#[derive(Debug, Clone, Copy)]
+struct Set {
+    signer: &'static str,
+    owned: &'static [(&'static str, Change)],
+}
+
+impl Set {
+    /// Its verdict: its signer's, joined with each owned row's.
+    fn verdict(&self, record: &Facts<V>) -> Verdict {
+        let row = |(key, change): &(&str, Change)| db::row(record, self.signer, text(key), *change);
+        (self.owned.iter().map(row)).fold(db::set(record, self.signer), Verdict::and)
     }
 }
 
@@ -123,7 +149,7 @@ fn an_owned_row_changes_only_by_its_person_s_devices() {
     assert_eq!(db::row(&r, PRIYA, text(SAM), Change::Write), not_theirs);
     // A device the record binds to nobody waits for it.
     let unknown = Verdict::Waits(Lacks::Device);
-    assert_eq!(db::row(&r, "uma", text("uma"), Change::Write), unknown);
+    assert_eq!(db::row(&r, UMA, text(UMA), Change::Write), unknown);
 }
 
 /// Plant: the key compared by its bytes whatever its type (Priya's key's
@@ -181,7 +207,7 @@ fn a_removed_person_s_rows_take_deletes_from_any_member() {
         removal,
         "her computer stands"
     );
-    let gone = record(&[(KEEPER, PRIYA), (KEEPER, PRIYA_PHONE)]);
+    let gone = removed(&[PRIYA, PRIYA_PHONE]);
     assert_eq!(
         db::row(&gone, SAM, text(PRIYA), Change::Delete),
         Verdict::Taken
@@ -196,145 +222,142 @@ fn a_removed_person_s_rows_take_deletes_from_any_member() {
         not_theirs,
         "deletes only"
     );
-    // Her own devices' sets are hers; where they stop is their fence's.
+    // Her own devices' sets stay hers, removed or not.
     assert_eq!(
         db::row(&gone, PRIYA, text(PRIYA), Change::Write),
         Verdict::Taken
     );
     // A key the record binds to nobody may be a person not yet held.
-    assert_eq!(db::row(&gone, SAM, text("uma"), Change::Delete), removal);
+    assert_eq!(db::row(&gone, SAM, text(UMA), Change::Delete), removal);
 }
 
-/// Plant: a set past its device's fence taken.
+/// Plants: a set the record binds no signer of taken; a removed device's
+/// set refused.
 #[test]
-fn a_removed_device_s_sets_count_up_to_its_lowest_fence() {
-    let (before, after) = (record(&[]), record(&[(PRIYA, PRIYA_PHONE)]));
-    let fences = [phone_fence(SAM, Some(2)), phone_fence(PRIYA, Some(4))];
+fn a_removed_device_s_sets_are_taken_like_any_device_s() {
+    let before = record(&[]);
+    let after = record(&[(PRIYA, PRIYA_PHONE)]);
+    let gone = removed(&[PRIYA, PRIYA_PHONE]);
+    for r in [&before, &after, &gone] {
+        for signer in [PRIYA, PRIYA_PHONE, SAM, TIA] {
+            assert_eq!(db::set(r, signer), Verdict::Taken, "{signer}");
+        }
+        assert_eq!(db::set(r, UMA), Verdict::Waits(Lacks::Device));
+    }
     assert_eq!(
-        Cut::of(&before, PRIYA_PHONE, &fences),
-        Cut::Stands,
-        "no Remove, no cut"
+        db::row(&after, PRIYA_PHONE, text(PRIYA), Change::Write),
+        Verdict::Taken,
+        "a removed device's write to its own person's row"
     );
-    assert_eq!(Cut::Stands.set(9), Verdict::Taken);
-    assert_eq!(Cut::of(&after, PRIYA_PHONE, &[]), Cut::Unfenced);
-    assert_eq!(Cut::Unfenced.set(0), Verdict::Waits(Lacks::Fence));
-    let cut = Cut::of(&after, PRIYA_PHONE, &fences);
-    assert_eq!(cut, Cut::At(Some(2)));
-    for seq in 0..=2 {
-        assert_eq!(cut.set(seq), Verdict::Taken, "{seq}");
-    }
-    for seq in 3..=5 {
-        assert_eq!(cut.set(seq), Verdict::Refused(Why::PastCut), "{seq}");
-    }
-    let none = phone_fence(TIA, None);
-    let all = [fences[0], fences[1], none];
-    assert_eq!(
-        Cut::of(&after, PRIYA_PHONE, &all),
-        Cut::At(None),
-        "a copy holding none"
-    );
-    assert_eq!(Cut::At(None).set(0), Verdict::Refused(Why::PastCut));
-    assert_eq!(Cut::of(&after, "uma", &fences), Cut::Unknown);
-    assert_eq!(Cut::Unknown.set(0), Verdict::Waits(Lacks::Device));
 }
 
-/// A fence counts by its signer's binding as a computer and its device's
-/// Remove, and never stops counting: not when its signer is cut after.
-#[test]
-fn a_computer_s_fence_of_a_removed_device_counts_for_good() {
-    let (before, after) = (record(&[]), record(&[(PRIYA, PRIYA_PHONE)]));
-    let sam = phone_fence(SAM, Some(2));
-    assert_eq!(db::fence(&after, &sam), Verdict::Taken);
-    assert_eq!(db::fence(&before, &sam), Verdict::Waits(Lacks::Removal));
-    let phone = Fence {
-        by: SAM_PHONE,
-        ..sam
-    };
-    assert_eq!(db::fence(&after, &phone), Verdict::Refused(Why::NoCopy));
-    assert_eq!(Cut::of(&after, PRIYA_PHONE, &[phone]), Cut::Unfenced);
-    let stranger = Fence { by: "uma", ..sam };
-    assert_eq!(db::fence(&after, &stranger), Verdict::Waits(Lacks::Device));
-    let elsewhere = Fence {
-        device: TIA,
-        mark: Some(0),
-        ..sam
-    };
-    assert_eq!(Cut::of(&after, PRIYA_PHONE, &[elsewhere]), Cut::Unfenced);
-    let sam_cut = record(&[(PRIYA, PRIYA_PHONE), (KEEPER, SAM)]);
-    assert_eq!(db::fence(&sam_cut, &sam), Verdict::Taken);
-    assert_eq!(Cut::of(&sam_cut, PRIYA_PHONE, &[sam]), Cut::At(Some(2)));
-}
-
-/// A copy rebuilds only where it applied a set its device's cut refuses.
-#[test]
-fn a_copy_rebuilds_only_past_the_cut() {
-    let cut = Cut::At(Some(2));
-    assert!(!cut.undoes(None) && !cut.undoes(Some(2)));
-    assert!(cut.undoes(Some(3)));
-    assert!(Cut::At(None).undoes(Some(0)));
-    for open in [Cut::Unknown, Cut::Stands, Cut::Unfenced] {
-        assert!(!open.undoes(Some(9)), "{open:?}");
-    }
-}
-
-/// A set is taken only if its cut and every owned row it changes take it,
-/// and refused if any refuses.
+/// A set is taken only if its signer and every owned row it changes take
+/// it, and refused if any refuses.
 #[test]
 fn a_set_s_verdicts_join_refusal_first() {
-    let (taken, waits) = (Verdict::Taken, Verdict::Waits(Lacks::Fence));
-    let (past, theirs) = (
-        Verdict::Refused(Why::PastCut),
-        Verdict::Refused(Why::NotTheirs),
+    let taken = Verdict::Taken;
+    let (device, removal) = (
+        Verdict::Waits(Lacks::Device),
+        Verdict::Waits(Lacks::Removal),
     );
+    let theirs = Verdict::Refused(Why::NotTheirs);
     assert_eq!(taken.and(taken), taken);
-    assert_eq!((taken.and(waits), waits.and(taken)), (waits, waits));
-    assert_eq!((waits.and(past), past.and(waits)), (past, past));
-    assert_eq!((taken.and(past), past.and(theirs)), (past, past));
+    assert_eq!((taken.and(removal), removal.and(taken)), (removal, removal));
+    assert_eq!(
+        (removal.and(device), device.and(removal)),
+        (removal, device)
+    );
+    assert_eq!((removal.and(theirs), theirs.and(removal)), (theirs, theirs));
+    assert_eq!(taken.and(theirs), theirs);
+}
+
+/// Every key, signer and change in the house, and one the record binds to
+/// nobody, judged under each of `records`; and each set's own verdict.
+fn verdicts(records: &[Facts<V>]) -> Vec<Vec<Verdict>> {
+    let keys = [KEEPER, PRIYA, PRIYA_PHONE, SAM, SAM_PHONE, TIA, UMA];
+    let judged = |r: &Facts<V>| {
+        let mut all: Vec<_> = keys.iter().map(|signer| db::set(r, signer)).collect();
+        for signer in keys {
+            for key in keys {
+                for change in [Change::Write, Change::Delete] {
+                    all.push(db::row(r, signer, text(key), change));
+                }
+            }
+        }
+        all
+    };
+    records.iter().map(judged).collect()
+}
+
+/// The module has no way to refuse a set it once took: as the record grows
+/// by Removes, in any order, a taken or refused verdict never turns. A Remove
+/// arriving after a removed device's set was taken leaves it taken.
+/// Plants: a removed device's set refused; a removed device's write to its
+/// own person's row refused.
+#[test]
+fn no_verdict_turns_as_removes_arrive() {
+    let subsets = subsets(&[PRIYA_PHONE, PRIYA, SAM_PHONE, TIA]);
+    let records: Vec<_> = subsets.iter().map(|held| removed(held)).collect();
+    let judged = verdicts(&records);
+    for (a, fewer) in subsets.iter().enumerate() {
+        for (b, more) in subsets.iter().enumerate() {
+            if !fewer.iter().all(|key| more.contains(key)) {
+                continue;
+            }
+            for (i, (then, now)) in judged[a].iter().zip(&judged[b]).enumerate() {
+                if !matches!(then, Verdict::Waits(_)) {
+                    assert_eq!(then, now, "verdict {i} under {fewer:?}, then {more:?}");
+                }
+            }
+        }
+    }
+    let phone = Set {
+        signer: PRIYA_PHONE,
+        owned: &[(PRIYA, Change::Write)],
+    };
+    let (first, last) = (&records[0], records.last().unwrap());
+    assert_eq!(phone.verdict(first), Verdict::Taken);
+    assert_eq!(
+        phone.verdict(last),
+        Verdict::Taken,
+        "its Remove came after it was taken"
+    );
 }
 
 #[derive(Debug, Clone, Copy)]
 enum Event {
-    Remove,
-    Fence(usize),
-    Set(u64),
+    Remove(usize),
+    Set(usize),
 }
 
 /// One copy of an app's database, as a carrier keeps it: a set taken is
-/// applied, one refused is dropped for good, one that waits is held; each
-/// arrival judges again what it holds, and a cut that refuses something
-/// applied rebuilds.
+/// applied and never judged again, one refused is dropped for good, one
+/// that waits is held, never applied; each Remove judges again what it
+/// holds. `removes` is a mask of the Removes held, indexing `records`.
 #[derive(Default)]
 struct Copy {
-    removed: bool,
-    fences: Vec<Fence<'static>>,
-    held: BTreeSet<u64>,
-    applied: BTreeSet<u64>,
-    refused: BTreeSet<u64>,
+    removes: usize,
+    held: BTreeSet<usize>,
+    applied: BTreeSet<usize>,
+    refused: BTreeSet<usize>,
 }
 impl Copy {
-    fn take(&mut self, event: Event, records: &[Facts<V>; 2], fences: &[Fence<'static>]) {
+    fn take(&mut self, event: Event, records: &[Facts<V>], sets: &[Set]) {
         match event {
-            Event::Remove => self.removed = true,
-            Event::Fence(i) => self.fences.push(fences[i]),
-            Event::Set(seq) => drop(self.held.insert(seq)),
+            Event::Remove(i) => self.removes |= 1 << i,
+            Event::Set(i) => drop(self.held.insert(i)),
         }
-        let record = &records[usize::from(self.removed)];
-        let cut = Cut::of(record, PRIYA_PHONE, &self.fences);
-        if cut.undoes(self.applied.last().copied()) {
-            let undone: Vec<_> = (self.applied.iter().copied())
-                .filter(|s| cut.set(*s) != Verdict::Taken)
-                .collect();
-            for seq in undone {
-                self.applied.remove(&seq);
-                self.refused.insert(seq);
-            }
-        }
-        for seq in std::mem::take(&mut self.held) {
-            let _ = match cut.set(seq) {
-                Verdict::Taken => self.applied.insert(seq),
-                Verdict::Refused(_) => self.refused.insert(seq),
-                Verdict::Waits(_) => self.held.insert(seq),
+        let record = &records[self.removes];
+        for i in std::mem::take(&mut self.held) {
+            let _ = match sets[i].verdict(record) {
+                Verdict::Taken => self.applied.insert(i),
+                Verdict::Refused(_) => self.refused.insert(i),
+                Verdict::Waits(_) => self.held.insert(i),
             };
+        }
+        for i in &self.applied {
+            let now = sets[*i].verdict(record);
+            assert_eq!(now, Verdict::Taken, "set {i}, applied, never turns");
         }
     }
 }
@@ -355,24 +378,48 @@ fn orders(events: &[Event]) -> Vec<Vec<Event>> {
     all
 }
 
-/// Every order of the Remove, two fences that disagree and the device's
-/// sets ends with the same copy: what the lowest fence takes, applied,
-/// the rest refused, nothing held. A copy that took a set past the cut
-/// before the Remove came ends equal to one that never saw it.
-/// Plants: the first fence held decides; the highest fence decides, so a
-/// set one copy refused for good another later takes.
+/// Every order of Priya's two Removes and five sets ends with the same copy:
+/// her phone's sets applied, whether they came before its Remove or after;
+/// Sam's delete of her row held until both Removes, then applied; Sam's
+/// phone's write to it refused; a stranger's set held. At every arrival, no
+/// set a copy applied has turned, and what every copy applied is what the
+/// whole record takes.
+/// Plants: a removed device's set refused; a removed device's write to its
+/// own person's row refused.
 #[test]
-fn every_order_of_the_remove_fences_and_sets_ends_alike() {
-    let records = [record(&[]), record(&[(PRIYA, PRIYA_PHONE)])];
-    let fences = [phone_fence(PRIYA, Some(2)), phone_fence(SAM, Some(0))];
-    let mut events = vec![Event::Remove, Event::Fence(0), Event::Fence(1)];
-    events.extend((0..4).map(Event::Set));
+fn every_order_of_the_removes_and_sets_ends_alike() {
+    let removes = [PRIYA, PRIYA_PHONE];
+    let records: Vec<_> = subsets(&removes).iter().map(|h| removed(h)).collect();
+    let sets = [
+        Set {
+            signer: PRIYA_PHONE,
+            owned: &[(PRIYA, Change::Write)],
+        },
+        Set {
+            signer: PRIYA_PHONE,
+            owned: &[],
+        },
+        Set {
+            signer: SAM,
+            owned: &[(PRIYA, Change::Delete), (SAM, Change::Write)],
+        },
+        Set {
+            signer: SAM_PHONE,
+            owned: &[(PRIYA, Change::Write)],
+        },
+        Set {
+            signer: UMA,
+            owned: &[],
+        },
+    ];
+    let mut events: Vec<_> = (0..removes.len()).map(Event::Remove).collect();
+    events.extend((0..sets.len()).map(Event::Set));
     let all = orders(&events);
     assert_eq!(all.len(), 5040);
     let ended = |order: &[Event]| {
         let mut copy = Copy::default();
         for event in order {
-            copy.take(*event, &records, &fences);
+            copy.take(*event, &records, &sets);
         }
         (copy.applied, copy.refused, copy.held)
     };
@@ -380,30 +427,22 @@ fn every_order_of_the_remove_fences_and_sets_ends_alike() {
     for order in &all {
         assert_eq!(ended(order), first, "{:?} against {:?}", order, all[0]);
     }
-    let cut = Cut::of(&records[1], PRIYA_PHONE, &fences);
-    let taken: BTreeSet<u64> = (0..4).filter(|s| cut.set(*s) == Verdict::Taken).collect();
-    let refused = BTreeSet::from([1, 2, 3]);
-    assert_eq!(first, (BTreeSet::from([0]), refused, BTreeSet::new()));
-    assert_eq!(
-        first.0, taken,
-        "what every copy applied is what the cut takes"
+    let expected = (
+        BTreeSet::from([0, 1, 2]),
+        BTreeSet::from([3]),
+        BTreeSet::from([4]),
     );
-    let mut unseen = Copy::default();
-    let never = [
-        Event::Set(0),
-        Event::Remove,
-        Event::Fence(0),
-        Event::Fence(1),
-    ];
-    for event in never {
-        unseen.take(event, &records, &fences);
-    }
+    assert_eq!(first, expected);
+    let whole = records.last().unwrap();
+    let taken: BTreeSet<_> = (0..sets.len())
+        .filter(|i| sets[*i].verdict(whole) == Verdict::Taken)
+        .collect();
+    assert_eq!(first.0, taken, "what every copy applied, the record takes");
     let mut early = Copy::default();
-    for event in [Event::Set(0), Event::Set(3)]
-        .into_iter()
-        .chain(never.into_iter().skip(1))
-    {
-        early.take(event, &records, &fences);
+    for event in [Event::Set(2), Event::Remove(0)] {
+        early.take(event, &records, &sets);
     }
-    assert_eq!(early.applied, unseen.applied);
+    assert_eq!(early.held, BTreeSet::from([2]), "held, not applied");
+    early.take(Event::Remove(1), &records, &sets);
+    assert_eq!(early.applied, BTreeSet::from([2]), "then applied once");
 }

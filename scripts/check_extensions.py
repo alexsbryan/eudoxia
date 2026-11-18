@@ -73,9 +73,12 @@ cases += [
     ("another person's owned row is not written", "community/src/db.rs", "Change::Write => Verdict::Refused(Why::NotTheirs),", "Change::Write => Verdict::Taken,", "db", "an_owned_row_changes_only_by_its_person_s_devices"),
     ("an owned row's key is text of exact bytes", "community/src/db.rs", "(key.kind == Type::Text).then(", "true.then(", "db", "a_key_is_its_person_s_only_as_text_of_exactly_its_bytes"),
     ("a standing person's row is not deleted", "community/src/db.rs", "Change::Delete if gone(record, owner) => Verdict::Taken,", "Change::Delete => Verdict::Taken,", "db", "a_removed_person_s_rows_take_deletes_from_any_member"),
-    ("a set past its device's fence is refused", "community/src/db.rs", "Self::At(mark) if Some(seq) <= mark => Verdict::Taken,", "Self::At(_) => Verdict::Taken,", "db", "a_removed_device_s_sets_count_up_to_its_lowest_fence"),
-    ("fences in any order make one cut", "community/src/db.rs", ".map(|f| f.mark).min();", ".map(|f| f.mark).next();", "db", "every_order_of_the_remove_fences_and_sets_ends_alike"),
-    ("a refusal past the cut is final", "community/src/db.rs", ".map(|f| f.mark).min();", ".map(|f| f.mark).max();", "db", "every_order_of_the_remove_fences_and_sets_ends_alike"),
+    ("a set waits for its signer's binding", "community/src/db.rs", "if record.person_of(signer).is_some() {", "if true {", "db", "a_removed_device_s_sets_are_taken_like_any_device_s"),
+    ("a removed device's sets are taken", "community/src/db.rs", "if record.person_of(signer).is_some() {", "if record.removed(signer) {\n        Verdict::Refused(Why::NotTheirs)\n    } else if record.person_of(signer).is_some() {", "db", "a_removed_device_s_sets_are_taken_like_any_device_s"),
+    ("a Remove never turns a taken set", "community/src/db.rs", "if record.person_of(signer).is_some() {", "if record.removed(signer) {\n        Verdict::Refused(Why::NotTheirs)\n    } else if record.person_of(signer).is_some() {", "db", "no_verdict_turns_as_removes_arrive"),
+    ("a Remove never turns a taken row", "community/src/db.rs", "_ if owner == person => Verdict::Taken,", "_ if owner == person && !record.removed(signer) => Verdict::Taken,", "db", "no_verdict_turns_as_removes_arrive"),
+    ("every order ends alike: no set refused once taken", "community/src/db.rs", "if record.person_of(signer).is_some() {", "if record.removed(signer) {\n        Verdict::Refused(Why::NotTheirs)\n    } else if record.person_of(signer).is_some() {", "db", "every_order_of_the_removes_and_sets_ends_alike"),
+    ("every order ends alike: no row refused once taken", "community/src/db.rs", "_ if owner == person => Verdict::Taken,", "_ if owner == person && !record.removed(signer) => Verdict::Taken,", "db", "every_order_of_the_removes_and_sets_ends_alike"),
 ]
 
 integration = sys.argv[1:] == ["--integration"]

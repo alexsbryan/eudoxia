@@ -136,6 +136,18 @@ rights is unsound. Incremental interpretation must equal F of the current held
 set and must support invalidation/retraction. It must retain relevant source
 objects, not discard colliding/forked objects by a convenient sequence/path key.
 
+Which lines retract is the profile's choice. In the community profile a
+person's Removes of their own keys never retract one another: each takes its
+key out whatever another of that person's Removes says, so the keys they take
+out only grow with the held set, short of the office's cut of the key that
+signed one, or a fork. Two of one person's devices that remove each other are
+both out; two concurrent Leaves of one person leave every key of theirs out; a
+device its person removed cannot stand again by signing a Remove of its
+remover dated before its removal. A removed key's lines past its Remove's
+coverage stay retracted (`community/src/history.rs`, `exits`). The cost is in
+`THREAT_MODEL.md` §3: a stolen device's Removes of its person's other devices
+stand until the keeper cuts it.
+
 This is a design obligation for the actual native interpreter; the RootInterpreter
 trait name or an append-only journal does not establish it.
 
@@ -228,11 +240,11 @@ grows. That is a key's binding to a person; the office's cut of a key, once R
 holds the cut's reach, every line of the key it names; and a binding resting
 on a line past such a reach, which the cut retracts. Once the office has cut
 every key R binds to a person but those, R binds that person no other key. The
-rules never read standing now, nor a person's own Remove of their key: R can
-take that back as it grows (P5), when another of their devices signs a Remove
-disputing it or a later cut retracts the line that made it. A copy applies a
-taken set, drops a refused one for good, holds one that waits, and takes back
-nothing it applied (`community/src/db.rs`).
+rules never read standing now, nor a person's own Remove of their key. No
+other Remove of theirs takes it back (P5), but R can as it grows: a later cut
+of the key that signed it, whose reach leaves it out, retracts it. A copy
+applies a taken set, drops a refused one for good, holds one that waits, and
+takes back nothing it applied (`community/src/db.rs`).
 
 *A device's sets.* A set signed by d is taken iff R binds d, whether or not R
 holds d's Remove, and every owned row it changes takes it. It waits while R

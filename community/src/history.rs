@@ -890,7 +890,8 @@ impl<'a, C: Vocabulary> Community<'a, C> {
         Ok(())
     }
     /// An exit retracts its key's lines past its coverage: the Remove's own
-    /// ancestry when the key signed it, and the lines `through` names.
+    /// ancestry when the key signed it, and the lines `through` names. It
+    /// never retracts another exit (`exits`).
     fn allowed_by_exits(
         &self,
         id: &Id<C>,
@@ -943,24 +944,18 @@ impl<'a, C: Vocabulary> Community<'a, C> {
             through: through.clone(),
         })
     }
+    /// Every exit no cut retracts. Exits never void each other: each takes its
+    /// key out, whatever another Remove of that person says or retracts, so
+    /// what they take out only grows with the held set, short of the office's
+    /// cut of the key that signed one, or a fork of a binding it rests on.
     fn exits(&self, cuts: &[SourceCut<C>], power: &BTreeSet<Id<C>>) -> Vec<SourceExit<C>> {
-        let candidates: Vec<_> = self
-            .held()
+        self.held()
             .filter(|(_, op)| matches!(op.act, Act::Remove { .. }))
             .filter_map(|(id, _)| {
                 self.exit(id)
                     .ok()
                     .filter(|_| self.allowed_by_cuts(id, cuts, power).is_ok())
             })
-            .collect();
-        let valid: BTreeSet<_> = candidates
-            .iter()
-            .filter(|exit| self.allowed_by_exits(&exit.by, &candidates, power).is_ok())
-            .map(|exit| exit.by.clone())
-            .collect();
-        candidates
-            .into_iter()
-            .filter(|exit| valid.contains(&exit.by))
             .collect()
     }
     /// Positive causal evidence only. An unheld edge proves no ordering and is
@@ -1529,7 +1524,7 @@ impl<'a, C: Vocabulary> Community<'a, C> {
     }
     /// Whether `whole`, cuts whose reach the record holds, retract `member`'s
     /// binding: the rule [`Community::members`] reads cuts by, where it can
-    /// only refuse for good. Exits are not read: the record can take one back.
+    /// only refuse for good. Exits are not read: a later cut can take one back.
     fn retracted(
         &self,
         member: &Member<C>,
@@ -1551,6 +1546,10 @@ impl<'a, C: Vocabulary> Community<'a, C> {
         let actor = self.person(op, &mut BTreeSet::new())?;
         let resolution = self.resolution();
         self.allowed_by_cuts(id, &resolution.cuts, &resolution.support)?;
+        // An exit counts whatever another exit says (`exits`).
+        if matches!(op.act, Act::Remove { .. }) && self.exit(id).is_ok() {
+            return Ok(());
+        }
         self.allowed_by_exits(id, self.final_exits(), &resolution.support)?;
         let base = |dispute: &OfficeDispute<Id<C>>| {
             resolution
@@ -1613,7 +1612,6 @@ impl<'a, C: Vocabulary> Community<'a, C> {
                         why: SourceFault::Cycle,
                     }))
             }
-            Act::Remove { .. } if self.exit(id).is_ok() => Ok(()),
             Act::HandOn { .. } | Act::Meets | Act::Slots { .. } | Act::Remove { .. } => {
                 if resolution.selected.contains(id) {
                     return Ok(());

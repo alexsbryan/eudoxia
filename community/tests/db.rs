@@ -471,7 +471,7 @@ fn no_verdict_turns_as_removes_arrive() {
 }
 
 /// Histories of Priya's in which lines arriving after a delete of her row
-/// could take it back: a binding, a cut, or one of her own Removes.
+/// could take it back: a binding or a cut, alone or beside her own Removes.
 fn histories() -> Vec<(&'static str, Lines)> {
     let own = || (1, remove(PRIYA, None, PRIYA_PHONE, &[]));
     vec![
@@ -494,7 +494,7 @@ fn histories() -> Vec<(&'static str, Lines)> {
             ],
         ),
         (
-            "one of her Removes disputing another",
+            "her two devices' Removes of each other",
             vec![
                 (1, remove(PRIYA_PHONE, None, PRIYA, &[])),
                 (2, remove(PRIYA_PHONE, Some(1), PRIYA_PHONE, &[])),

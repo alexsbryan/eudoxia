@@ -10,6 +10,15 @@ import tomllib
 
 root = Path(__file__).resolve().parent.parent
 temporary = root / "target"
+# A person's Removes of their own keys voiding each other: each exit judged
+# against every other, so a back-dated Remove of its remover by a removed
+# device puts it back.
+dispute = ("community/src/history.rs", ".get_or_init(|| self.exits(&resolution.cuts, &resolution.support))",
+           ".get_or_init(|| {\n                let all = self.exits(&resolution.cuts, &resolution.support);\n"
+           "                let voided: BTreeSet<_> = (all.iter())\n"
+           "                    .filter(|e| self.allowed_by_exits(&e.by, &all, &resolution.support).is_err())\n"
+           "                    .map(|e| e.by.clone())\n                    .collect();\n"
+           "                all.into_iter().filter(|e| !voided.contains(&e.by)).collect()\n            })")
 plants = [
     ("native source identity", "src/derivation.rs", ".find(|f| f.source == *reference)", ".find(|f| f.source.digest == reference.digest)",
      "scale_cached_interpretations_and_native_source_names_are_not_clock_identity"),
@@ -85,6 +94,12 @@ cases += [
     ("no verdict turns: a retracted binding", "community/src/db.rs", "m.first == person && !self.retracted().contains(*key)", "m.first == person", "db", "no_verdict_turns_as_more_of_a_removed_person_s_history_arrives"),
     ("no verdict turns: a cut's unheld reach", "community/src/history.rs", "reach.missing.is_empty()", "true", "db", "no_verdict_turns_as_more_of_a_removed_person_s_history_arrives"),
     ("no verdict turns: a person's own Remove", "community/src/db.rs", "self.cuts().contains_key(device)", "self.cuts().contains_key(device) || self.out().get(device).is_some_and(|(_, own)| *own)", "db", "no_verdict_turns_as_more_of_a_removed_person_s_history_arrives"),
+    ("removal wins: a back-dated Remove of its remover", *dispute, "exits", "a_device_its_person_removed_stays_out_after_a_back_dated_remove_of_its_remover"),
+    ("removal wins: two concurrent leaves", *dispute, "exits", "two_concurrent_leaves_leave_every_key_of_their_person_out"),
+    ("removal wins: a remover the keeper cut", *dispute, "exits", "a_device_removed_by_a_device_the_keeper_cut_stays_out_after_removing_it"),
+    ("removal wins: no own removal undone as lines arrive", *dispute, "exits", "no_key_a_person_s_own_remove_took_out_stands_again_as_more_arrives"),
+    ("an exit's verdict reads no other exit", "community/src/history.rs", "if matches!(op.act, Act::Remove { .. }) && self.exit(id).is_ok() {", "if false {", "exits", "a_device_its_person_removed_stays_out_after_a_back_dated_remove_of_its_remover"),
+    ("the office's cut retracts an exit its signer made", "community/src/history.rs", ".filter(|_| self.allowed_by_cuts(id, cuts, power).is_ok())", "", "exits", "a_keeper_s_cut_holds_against_the_cut_device_s_back_dated_removes"),
 ]
 
 integration = sys.argv[1:] == ["--integration"]

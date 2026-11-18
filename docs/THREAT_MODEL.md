@@ -78,6 +78,20 @@ Native embeddings carry these further construction obligations:
 - Conserved positive guest-slot admissions replace partial-view recounting.
   Pending/offline capacity remains unavailable, and controller equivocation
   freezes its slot; no instant globally consistent physical occupancy is claimed.
+- A person's Removes of their own keys never void each other (PROOFS P5). Two
+  of one person's devices that remove each other are both out, two concurrent
+  Leaves leave every key of theirs out, and a device its person removed cannot
+  stand again by signing a Remove of its remover dated before its removal. The
+  cost: a stolen device can remove its owner's other devices, and nothing the
+  owner signs undoes that. A Remove that names no line of the key it removes
+  retracts every line that key signed, and each binding resting on one, such as
+  a person that key admitted. The keeper lets them back in by cutting the
+  stolen key with a reach that leaves its Removes out: the cut retracts them,
+  and what they alone took out stands again. A key its own Remove took
+  out stays out, and so does a key whose remover the keeper's cut covers. The
+  keeper cannot bind a new key to that person: an Invite naming a person binds
+  only from that person's own devices. The keeper can admit a new key as a new
+  person; another standing device of theirs can admit one as theirs.
 - A removed device's change sets in an app database count like any device's
   once the record binds it (PROOFS P10). No rule undoes a set a copy took, so
   pruning stays safe and copies that took the same sets agree. A Remove stops
@@ -91,11 +105,11 @@ Native embeddings carry these further construction obligations:
   waits until the office has cut every key of that person, each by a cut
   whose named lines the record holds, and then it is taken for good, so the
   group can clear a removed person's owned rows. A person's own Remove of a
-  key does not count: another of their devices can dispute it, or a later cut
-  retract it, so the embedding's removal cuts every key the record binds to
-  the person, the ones they removed themselves included. A copy holds such a
-  delete, never applying it early, until that removal comes, and it may never
-  come. The carrier bounds what one member can make it hold.
+  key does not count: a later cut of the key that signed it can retract it, so
+  the embedding's removal cuts every key the record binds to the person, the
+  ones they removed themselves included. A copy holds such a delete, never
+  applying it early, until that removal comes, and it may never come. The
+  carrier bounds what one member can make it hold.
 
 Within legitimately granted scope, a malicious member/app may still perform
 harmful allowed actions. Narrow rights, resource-local rates/quotas and safe app

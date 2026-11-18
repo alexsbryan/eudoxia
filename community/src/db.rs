@@ -12,8 +12,8 @@
 //! the record is one it never takes back as it grows: a key's binding; the
 //! office's cut of a key, once the record holds every line of the key it
 //! names; and a binding resting on a line such a cut retracts. A person's
-//! own Remove is never read: another of their devices can sign a Remove
-//! that disputes it, and a later cut can retract the line that made it.
+//! own Remove is never read: no other Remove of theirs voids it, but a
+//! later cut of the key that signed it can retract it.
 //! Who stands now is never read either, since a member cut later would turn
 //! a verdict already acted on. The record's own disputed cases, a fork that
 //! takes a binding or a cut back, are its own to settle.

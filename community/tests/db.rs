@@ -1,11 +1,12 @@
 //! Laws of an app's shared database: a set counts once the record binds its
 //! signer, removed or not; an owned row changes only by its person's
-//! devices; a removed person's rows take deletes from any member; and no
-//! verdict a copy acted on ever turns, so every order of arrival ends alike.
-//! Each law names the plant it went red on.
+//! devices; a removed person's rows take deletes from any member once the
+//! office has cut every key of theirs; and no verdict a copy acted on ever
+//! turns, whatever lines arrive after it, so every order of arrival ends
+//! alike. Each law names the plant it went red on.
 use eudoxia_community::db::{self, Change, Key, Lacks, Type, Verdict, Why};
 use eudoxia_community::{
-    Act, Community, Evidence, Facts, Roots, SourceMember, Statement, Vocabulary,
+    Act, Community, Evidence, Facts, Redemption, Roots, SourceMember, Statement, Vocabulary,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,6 +25,7 @@ impl Vocabulary for V {
 const KEEPER: &str = "keeper";
 const PRIYA: &str = "priya";
 const PRIYA_PHONE: &str = "priya-phone";
+const PRIYA_LAPTOP: &str = "priya-laptop";
 const SAM: &str = "sam";
 const SAM_PHONE: &str = "sam-phone";
 const TIA: &str = "tia";
@@ -85,6 +87,69 @@ fn record(removes: &[(&str, &str)]) -> Facts<V> {
 fn removed(keys: &[&'static str]) -> Facts<V> {
     let removes: Vec<_> = keys.iter().map(|key| (KEEPER, *key)).collect();
     record(&removes)
+}
+
+/// A line `by` signs after `prev` on its own chain.
+fn line(by: &str, prev: Option<u32>, act: Act<V>) -> Statement<V> {
+    Statement {
+        author: by.to_string(),
+        stands_as: by.to_string(),
+        prev,
+        at: 2,
+        readable: true,
+        delegated: false,
+        act,
+    }
+}
+
+/// `by`'s Remove of `key`, covering the lines of it `through` names.
+fn remove(by: &str, prev: Option<u32>, key: &str, through: &[u32]) -> Statement<V> {
+    let key = key.to_string();
+    let through = through.to_vec();
+    line(by, prev, Act::Remove { key, through })
+}
+
+/// Lines of a history, each under its id.
+type Lines = Vec<(u32, Statement<V>)>;
+
+/// The record's facts once these lines are held, each under its id.
+fn holding(lines: &[(u32, Statement<V>)]) -> Facts<V> {
+    let roots = roots();
+    let held = lines.iter().cloned().collect();
+    let forged = BTreeSet::new();
+    Community::new(&roots, &Evidence { held, forged }).facts()
+}
+
+/// Priya binds her laptop by her own Invite and Admit (lines 1 and 2); the
+/// keeper cuts her computer, covering the lines of it `through` names (3),
+/// then her phone (4).
+fn laptop_then_cuts(through: &[u32]) -> Lines {
+    let invite = Act::Invite {
+        until: 100,
+        device_of: Some(PRIYA.into()),
+    };
+    let redemption = Redemption {
+        invite: 1,
+        device: true,
+        consent: true,
+    };
+    let admit = Act::Admit {
+        person: PRIYA,
+        key: PRIYA_LAPTOP.into(),
+        sound: true,
+        redemption: Some(redemption),
+    };
+    vec![
+        (1, line(PRIYA, None, invite)),
+        (2, line(PRIYA, Some(1), admit)),
+        (3, remove(KEEPER, None, PRIYA, through)),
+        (4, remove(KEEPER, Some(3), PRIYA_PHONE, &[])),
+    ]
+}
+
+/// Sam's delete of Priya's row, under `record`.
+fn delete_of_priya_s_row(record: &Facts<V>) -> Verdict {
+    db::row(record, SAM, text(PRIYA), Change::Delete)
 }
 
 /// Every subset of `keys`, the one at index `mask` holding each key whose
@@ -231,6 +296,78 @@ fn a_removed_person_s_rows_take_deletes_from_any_member() {
     assert_eq!(db::row(&gone, SAM, text(UMA), Change::Delete), removal);
 }
 
+/// A key bound to a person by a line past a cut's reach leaves a delete of
+/// their row taken: Priya's own Admit of her laptop, which the keeper's cut
+/// of her computer does not name, arrives after both her keys are cut. The
+/// cut retracts that binding for good.
+/// Plant: a binding a cut retracts still counted as the person's key.
+#[test]
+fn a_key_bound_past_a_cut_s_reach_leaves_a_taken_delete_taken() {
+    let lines = laptop_then_cuts(&[]);
+    let cuts = holding(&lines[2..]);
+    assert_eq!(delete_of_priya_s_row(&cuts), Verdict::Taken);
+    let all = holding(&lines);
+    assert!(
+        all.bound().contains_key(PRIYA_LAPTOP),
+        "the record binds it"
+    );
+    assert!(
+        !all.standing().contains(PRIYA_LAPTOP),
+        "the cut retracts it"
+    );
+    assert_eq!(
+        delete_of_priya_s_row(&all),
+        Verdict::Taken,
+        "taken, and her laptop's binding arrived after"
+    );
+}
+
+/// A cut that names a line of its key the record lacks holds a delete of
+/// that person's row: the line may bind them a key the cut leaves standing,
+/// as Priya's Admit of her laptop does once it arrives.
+/// Plant: a cut counted before the record holds the lines it names.
+#[test]
+fn a_delete_waits_while_a_cut_names_a_line_the_record_lacks() {
+    let removal = Verdict::Waits(Lacks::Removal);
+    let lines = laptop_then_cuts(&[2]);
+    let cuts = holding(&lines[2..]);
+    assert_eq!(delete_of_priya_s_row(&cuts), removal, "line 2 unheld");
+    let all = holding(&lines);
+    assert!(all.standing().contains(PRIYA_LAPTOP), "the cut covers it");
+    assert_eq!(delete_of_priya_s_row(&all), removal, "her laptop stands");
+}
+
+/// A person's own Remove of one of their keys holds a delete of their row
+/// until the office cuts that key too, since the record can take that
+/// Remove back: here a second cut of the key that signed it, narrower than
+/// the first. Once the office has cut every key, the delete is taken.
+/// Plant: a person's own Remove counted as the office's cut.
+#[test]
+fn a_person_s_own_remove_holds_a_delete_until_the_office_cuts_that_key() {
+    let removal = Verdict::Waits(Lacks::Removal);
+    let lines = [
+        (1, remove(PRIYA, None, PRIYA_PHONE, &[])),
+        (2, remove(KEEPER, None, PRIYA, &[1])),
+        (3, remove(KEEPER, Some(2), PRIYA, &[])),
+        (4, remove(KEEPER, Some(3), PRIYA_PHONE, &[])),
+    ];
+    let first = holding(&lines[..2]);
+    assert!(first.out().contains_key(PRIYA_PHONE), "her Remove took it");
+    assert_eq!(delete_of_priya_s_row(&first), removal);
+    let second = holding(&lines[..3]);
+    assert!(
+        !second.out().contains_key(PRIYA_PHONE),
+        "the second cut undid it"
+    );
+    assert_eq!(delete_of_priya_s_row(&second), removal);
+    let all = holding(&lines);
+    assert_eq!(
+        delete_of_priya_s_row(&all),
+        Verdict::Taken,
+        "the keeper cut it"
+    );
+}
+
 /// Plants: a set the record binds no signer of taken; a removed device's
 /// set refused.
 #[test]
@@ -274,7 +411,16 @@ fn a_set_s_verdicts_join_refusal_first() {
 /// Every key, signer and change in the house, and one the record binds to
 /// nobody, judged under each of `records`; and each set's own verdict.
 fn verdicts(records: &[Facts<V>]) -> Vec<Vec<Verdict>> {
-    let keys = [KEEPER, PRIYA, PRIYA_PHONE, SAM, SAM_PHONE, TIA, UMA];
+    let keys = [
+        KEEPER,
+        PRIYA,
+        PRIYA_PHONE,
+        PRIYA_LAPTOP,
+        SAM,
+        SAM_PHONE,
+        TIA,
+        UMA,
+    ];
     let judged = |r: &Facts<V>| {
         let mut all: Vec<_> = keys.iter().map(|signer| db::set(r, signer)).collect();
         for signer in keys {
@@ -322,6 +468,78 @@ fn no_verdict_turns_as_removes_arrive() {
         Verdict::Taken,
         "its Remove came after it was taken"
     );
+}
+
+/// Histories of Priya's in which lines arriving after a delete of her row
+/// could take it back: a binding, a cut, or one of her own Removes.
+fn histories() -> Vec<(&'static str, Lines)> {
+    let own = || (1, remove(PRIYA, None, PRIYA_PHONE, &[]));
+    vec![
+        ("a key bound past a cut's reach", laptop_then_cuts(&[])),
+        ("a cut naming a line not held", laptop_then_cuts(&[2])),
+        (
+            "a second, narrower cut",
+            vec![
+                own(),
+                (2, remove(KEEPER, None, PRIYA, &[1])),
+                (3, remove(KEEPER, Some(2), PRIYA, &[])),
+            ],
+        ),
+        (
+            "a first cut after her own Removes",
+            vec![
+                own(),
+                (2, remove(PRIYA, Some(1), PRIYA, &[])),
+                (3, remove(KEEPER, None, PRIYA, &[])),
+            ],
+        ),
+        (
+            "one of her Removes disputing another",
+            vec![
+                (1, remove(PRIYA_PHONE, None, PRIYA, &[])),
+                (2, remove(PRIYA_PHONE, Some(1), PRIYA_PHONE, &[])),
+                (3, remove(PRIYA, None, PRIYA_PHONE, &[])),
+            ],
+        ),
+        (
+            "her phone's Remove of the computer that removed it",
+            vec![
+                own(),
+                (2, remove(KEEPER, None, PRIYA, &[1])),
+                (3, remove(PRIYA_PHONE, None, PRIYA, &[])),
+            ],
+        ),
+    ]
+}
+
+/// No verdict a copy acted on turns as more of a removed person's history
+/// arrives, whatever of it the copy held first: for each history, every
+/// verdict under each subset of its lines held stays under every larger one.
+/// Plants: a binding a cut retracts still counted as the person's key; a cut
+/// counted before the record holds the lines it names; a person's own Remove
+/// counted as the office's cut.
+#[test]
+fn no_verdict_turns_as_more_of_a_removed_person_s_history_arrives() {
+    for (history, lines) in histories() {
+        let held = |mask: usize| {
+            let lines = lines.iter().enumerate();
+            let kept = lines.filter(|(i, _)| mask & (1 << i) != 0);
+            kept.map(|(_, line)| line.clone()).collect::<Vec<_>>()
+        };
+        let all = 1usize << lines.len();
+        let records: Vec<_> = (0..all).map(|mask| holding(&held(mask))).collect();
+        let judged = verdicts(&records);
+        for fewer in 0..all {
+            for more in (0..all).filter(|more| fewer & !more == 0) {
+                for (i, (then, now)) in judged[fewer].iter().zip(&judged[more]).enumerate() {
+                    if !matches!(then, Verdict::Waits(_)) {
+                        let held = format!("{fewer:b}, then {more:b}");
+                        assert_eq!(then, now, "{history}: verdict {i} holding {held}");
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

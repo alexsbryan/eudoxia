@@ -9,12 +9,14 @@
 //! A verdict is closed ([`Verdict`]): taken; refused for good, which no
 //! later record undoes, so a copy may drop the set; or waits, held and never
 //! applied until the record brings what it lacks. Every answer read from
-//! the record is one it never takes back as it grows: a key's binding; a
-//! Remove that took a key; and, once it holds the Remove of every key of a
-//! person, that person's keys. Who stands now is never read, since a member
-//! cut later would turn a verdict already acted on. The record's own
-//! disputed cases, a fork that takes a binding or a cut back, are its own
-//! to settle.
+//! the record is one it never takes back as it grows: a key's binding; the
+//! office's cut of a key, once the record holds every line of the key it
+//! names; and a binding resting on a line such a cut retracts. A person's
+//! own Remove is never read: another of their devices can sign a Remove
+//! that disputes it, and a later cut can retract the line that made it.
+//! Who stands now is never read either, since a member cut later would turn
+//! a verdict already acted on. The record's own disputed cases, a fork that
+//! takes a binding or a cut back, are its own to settle.
 //!
 //! **No rule undoes a set a copy took.** A taken verdict is final, so a
 //! copy's state is the join of every set it has taken, whatever order they
@@ -42,26 +44,35 @@
 //! carries a row under each key, so moving a row to another person is
 //! refused whoever signs.
 //!
-//! **A removed person's rows.** Once the record holds the Remove of every
-//! key it binds to a row's person, any member's device may delete that row,
-//! and do nothing else to it, so the group can clear a removed person's
-//! rows. Until a copy's record holds that, the delete waits, held and never
+//! **A removed person's rows.** Once the office has cut every key the
+//! record binds to a row's person, but one whose binding a cut retracts,
+//! any member's device may delete that row, and do nothing else to it, so
+//! the group can clear a removed person's rows. A key the person removed
+//! themselves waits for the office's cut too: the record can take their
+//! own Remove back, and a taken delete is never undone. A cut counts once
+//! the record holds every line of its key it names: a line it lacks may
+//! bind the person a key the cut leaves standing. A key bound later rests
+//! on a line of a cut key past that cut's reach, so the cut retracts it.
+//! Until a copy's record holds all that, the delete waits, held and never
 //! applied: no copy can tell a removal on its way from none, and a refusal
 //! would part it for good from a copy that already holds the removal.
 use crate::{Facts, Vocabulary};
 
 /// What the rules read of the record: the community interpreter's
 /// [`Facts`], or an embedding's one projection of them. Each answer is
-/// cumulative: a binding and a Remove, once held, are never taken back.
+/// cumulative: a binding, a cut and a binding a cut retracts, once held,
+/// are never taken back.
 pub trait Record {
     /// The person's key the record binds `device`'s key to: its person's
     /// first key, which a cut key keeps. None while it binds it to none.
     fn person_of(&self, device: &str) -> Option<&str>;
-    /// Whether the record holds a Remove that took `device`'s key: a cut,
-    /// or its person's own.
-    fn removed(&self, device: &str) -> bool;
-    /// Every key the record binds to the person whose key is `person`. Once
-    /// the record holds the Remove of every key this gives, it gives no other.
+    /// Whether the office has cut `device`'s key by a cut whose reach the
+    /// record holds whole: every line of the key it names, back to the
+    /// key's first. A person's own Remove is not a cut.
+    fn cut(&self, device: &str) -> bool;
+    /// Every key the record binds to the person whose key is `person`, but
+    /// one whose binding rests on a line a cut retracts. Once the office has
+    /// cut every key this gives, it gives no other.
     fn keys_of(&self, person: &str) -> impl Iterator<Item = &str>;
 }
 
@@ -69,11 +80,13 @@ impl<C: Vocabulary> Record for Facts<C> {
     fn person_of(&self, device: &str) -> Option<&str> {
         self.bound().get(device).map(|m| m.first.as_str())
     }
-    fn removed(&self, device: &str) -> bool {
-        self.out().contains_key(device)
+    fn cut(&self, device: &str) -> bool {
+        self.cuts().contains_key(device)
     }
     fn keys_of(&self, person: &str) -> impl Iterator<Item = &str> {
-        let of = move |(_, m): &(_, &crate::SourceMember<_, _, _>)| m.first == person;
+        let of = move |(key, m): &(&_, &crate::SourceMember<_, _, _>)| {
+            m.first == person && !self.retracted().contains(*key)
+        };
         self.bound().iter().filter(of).map(|(key, _)| key.as_str())
     }
 }
@@ -122,8 +135,9 @@ impl core::error::Error for Why {}
 pub enum Lacks {
     /// The record's binding of its signer.
     Device,
-    /// The Remove of every key of the row's person, for a delete of their
-    /// row by another person's device.
+    /// The office's cut of every key of the row's person, each with every
+    /// line of the key it names, for a delete of their row by another
+    /// person's device.
     Removal,
 }
 
@@ -184,9 +198,9 @@ pub fn row(record: &impl Record, signer: &str, key: Key<'_>, change: Change) -> 
     }
 }
 
-/// Whether the record holds the Remove of every key it binds to `person`,
-/// and binds one.
+/// Whether the office has cut every key the record binds to `person`, but
+/// one whose binding a cut retracts, and the record binds one.
 fn gone(record: &impl Record, person: &str) -> bool {
     let mut keys = record.keys_of(person).peekable();
-    keys.peek().is_some() && keys.all(|k| record.removed(k))
+    keys.peek().is_some() && keys.all(|k| record.cut(k))
 }

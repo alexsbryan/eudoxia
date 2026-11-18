@@ -88,11 +88,14 @@ Native embeddings carry these further construction obligations:
   not the member who relayed it. Its values stand until someone writes over
   them; nothing clears them on its own.
 - A member can sign a delete of another person's owned row at any time. It
-  waits until the record holds the Remove of every key of that person, and
-  then it is taken, so the group can clear a removed person's owned rows. A
-  copy holds such a delete, never applying it early, until that removal
-  comes, and it may never come. The carrier bounds what one member can make
-  it hold.
+  waits until the office has cut every key of that person, each by a cut
+  whose named lines the record holds, and then it is taken for good, so the
+  group can clear a removed person's owned rows. A person's own Remove of a
+  key does not count: another of their devices can dispute it, or a later cut
+  retract it, so the embedding's removal cuts every key the record binds to
+  the person, the ones they removed themselves included. A copy holds such a
+  delete, never applying it early, until that removal comes, and it may never
+  come. The carrier bounds what one member can make it hold.
 
 Within legitimately granted scope, a malicious member/app may still perform
 harmful allowed actions. Narrow rights, resource-local rates/quotas and safe app

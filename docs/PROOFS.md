@@ -224,11 +224,15 @@ Model: each device signs change sets in a merged app database. A copy holds a
 record R and merges each set it takes into its state by a join: commutative,
 associative and idempotent. A carrier may prune a set once every value it
 wrote is overwritten. Premise: what the rules read of R is cumulative as R
-grows. That is a key's binding to a person, and a Remove that took a key; and
-once R holds the Remove of every key it binds to a person, it binds that person
-no other key. The rules never read standing now. A copy applies a taken set,
-drops a refused one for good, holds one that waits, and takes back nothing it
-applied (`community/src/db.rs`).
+grows. That is a key's binding to a person; the office's cut of a key, once R
+holds the cut's reach, every line of the key it names; and a binding resting
+on a line past such a reach, which the cut retracts. Once the office has cut
+every key R binds to a person but those, R binds that person no other key. The
+rules never read standing now, nor a person's own Remove of their key: R can
+take that back as it grows (P5), when another of their devices signs a Remove
+disputing it or a later cut retracts the line that made it. A copy applies a
+taken set, drops a refused one for good, holds one that waits, and takes back
+nothing it applied (`community/src/db.rs`).
 
 *A device's sets.* A set signed by d is taken iff R binds d, whether or not R
 holds d's Remove, and every owned row it changes takes it. It waits while R
@@ -236,9 +240,10 @@ binds d to nobody.
 
 *Owned rows.* A change to a row whose key's first value is v is taken iff R
 binds the signer to the person whose key is v, as TEXT of exactly its bytes,
-or the change is a delete and R holds a Remove for every key it binds to that
-person. It is refused iff v is not such text, or R binds the signer to
-another person and the change is a write. Otherwise it waits.
+or the change is a delete and the office has cut every key R binds to that
+person, but one whose binding such a cut retracts, each by a cut whose reach R
+holds. It is refused iff v is not such text, or R binds the signer to another
+person and the change is a write. Otherwise it waits.
 
 1. **Verdicts are final.** Each input that decides taken or refused is
    cumulative under the premise, so neither verdict changes as R grows. A set
@@ -267,14 +272,21 @@ made in the window before its removal arrives, and any a member relays on
 purpose. Their values stand until someone writes over them. Stopping a
 removed device is its transport's, which is the embedding's. The group can
 delete a removed person's owned rows by the delete rule above, and any member
-may change a shared row.
+may change a shared row. A person's own Removes clear none of their rows: the
+office cuts every key of theirs first, the ones they removed themselves
+included.
 
 Classification: proved in the stated model. The premise is an implementation
-obligation on the record. Its last clause matters to the delete rule alone: a
-key bound to a person after R holds the Remove of all their others would turn
-a delete of their row taken earlier. The record's own disputed cases, such as
-a fork that takes a binding or a cut back, fall outside the premise. They are
-settled by P5/P6, not here.
+obligation on the record, met by `Facts::cuts` and `Facts::retracted`
+(`community/src/history.rs`). A reach, once held whole, is fixed, and the office
+only adds cuts, so both grow with R. The last clause matters to the delete rule
+alone. A person's key other than their first is bound by a line of one of their
+keys, so a key bound after the office has cut all the others rests on a line
+past a cut's reach that R holds whole, and that cut retracts it. A cut whose
+reach R lacks counts for no delete: a line it names may bind the person a key
+it leaves standing. The record's own disputed cases, such as a fork that takes
+a binding or a cut back, fall outside the premise. They are settled by P5/P6,
+not here.
 
 ## 3. Analytic limits and the choices they force
 

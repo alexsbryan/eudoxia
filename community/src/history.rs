@@ -376,11 +376,16 @@ fn kept<K: Ord, T: Clone>(memo: &Kept<K, T>, key: K, f: impl FnOnce() -> T) -> T
 /// change: the office, every key ever bound (G1) and those standing, each
 /// key out with the Remove that took it and whether that was its own exit,
 /// and every held statement's verdict, each as [`Community::assess`] gives.
+/// Standing and out can turn as lines arrive (P5); two answers never do,
+/// short of the office's own disputes: each key cut by a cut whose reach
+/// the record holds whole, and each key bound by a line such a cut retracts.
 pub struct Facts<C: Vocabulary> {
     office: SourceOffice<Id<C>>,
     bound: BTreeMap<String, Member<C>>,
     standing: BTreeSet<String>,
     out: BTreeMap<String, (Id<C>, bool)>,
+    cuts: BTreeMap<String, Id<C>>,
+    retracted: BTreeSet<String>,
     verdicts: BTreeMap<Id<C>, Judged<C, ()>>,
     stops: BTreeMap<Id<C>, Id<C>>,
     setting: Option<(Id<C>, u8)>,
@@ -397,6 +402,18 @@ impl<C: Vocabulary> Facts<C> {
     }
     pub fn out(&self) -> &BTreeMap<String, (Id<C>, bool)> {
         &self.out
+    }
+    /// Each key the office has cut by a cut whose reach the record holds
+    /// whole, with the first such cut: every line of the key the cut names,
+    /// back to the key's first. A person's own Remove is not a cut.
+    pub fn cuts(&self) -> &BTreeMap<String, Id<C>> {
+        &self.cuts
+    }
+    /// Each key [`Facts::bound`] holds whose binding rests on a line a cut
+    /// of [`Facts::cuts`] retracts: its key's, past that cut's reach. The
+    /// reach is fixed once held whole, so no later line restores it.
+    pub fn retracted(&self) -> &BTreeSet<String> {
+        &self.retracted
     }
     pub fn verdicts(&self) -> &BTreeMap<Id<C>, Judged<C, ()>> {
         &self.verdicts
@@ -1474,11 +1491,26 @@ impl<'a, C: Vocabulary> Community<'a, C> {
             out.entry(exit.key.clone())
                 .or_insert((exit.by.clone(), true));
         }
+        let whole: Vec<_> = (resolution.cuts.iter())
+            .filter(|cut| self.reached(cut))
+            .cloned()
+            .collect();
+        let mut cuts = BTreeMap::new();
+        for cut in &whole {
+            cuts.entry(cut.key.clone()).or_insert(cut.by.clone());
+        }
+        let bound = self.raw_members();
+        let retracted = (bound.iter())
+            .filter(|(_, member)| self.retracted(member, &whole, &resolution.support))
+            .map(|(key, _)| key.clone())
+            .collect();
         Facts {
             office: resolution.state.clone(),
-            bound: self.raw_members(),
+            bound,
             standing: self.members().into_keys().collect(),
             out,
+            cuts,
+            retracted,
             verdicts: self
                 .held()
                 .map(|(id, _)| (id.clone(), self.assess(id)))
@@ -1487,6 +1519,30 @@ impl<'a, C: Vocabulary> Community<'a, C> {
             setting: (resolution.setting.clone())
                 .and_then(|id| Some((id.clone(), self.setting(&id).ok()?))),
         }
+    }
+    /// Whether the record holds `cut`'s reach whole: every line of its key it
+    /// names, back to the key's first. Until then it counts for no delete: a
+    /// line it lacks may bind the key's person a key the cut leaves standing.
+    fn reached(&self, cut: &SourceCut<C>) -> bool {
+        let reach = self.data_coverage(&cut.key, cut.through.clone());
+        reach.missing.is_empty()
+    }
+    /// Whether `whole`, cuts whose reach the record holds, retract `member`'s
+    /// binding: the rule [`Community::members`] reads cuts by, where it can
+    /// only refuse for good. Exits are not read: the record can take one back.
+    fn retracted(
+        &self,
+        member: &Member<C>,
+        whole: &[SourceCut<C>],
+        power: &BTreeSet<Id<C>>,
+    ) -> bool {
+        let AuthorityRef::Act(admit) = &member.source else {
+            return false;
+        };
+        let past_reach = SourceFailure::Refused {
+            why: SourceFault::Binding,
+        };
+        self.allowed_by_cuts(admit, whole, power) == Err(past_reach)
     }
     /// Whether one held statement is established: lawful in its own past and
     /// standing after the whole held set's office, cuts and exits.

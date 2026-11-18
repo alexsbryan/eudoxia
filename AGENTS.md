@@ -26,6 +26,7 @@ never bless an unknown-type error as evidence of a protected boundary.
 Checks: `python3 scripts/check.py` runs the whole gate — cargo fmt --all --check;
 cargo clippy --all-targets --all-features -- -D warnings; cargo test
 --all-features; the frozen acceptance contract (fixtures/contract); compiled
-fault plants (scripts/check_extensions.py); isolated production builds with no
-default features and with canon, also for wasm32-unknown-unknown. Do not weaken
-an acceptance test to make a refactor green.
+fault plants (scripts/check_extensions.py); the community profile's own fmt,
+Clippy, tests and wasm32 build (community/ is its own package root); isolated
+production builds with no default features and with canon, also for
+wasm32-unknown-unknown. Do not weaken an acceptance test to make a refactor green.

@@ -78,6 +78,19 @@ Native embeddings carry these further construction obligations:
 - Conserved positive guest-slot admissions replace partial-view recounting.
   Pending/offline capacity remains unavailable, and controller equivocation
   freezes its slot; no instant globally consistent physical occupancy is claimed.
+- A removed device's change sets in an app database stop at the lowest fence
+  that counts (PROOFS P10). Any member's computer can fence a removed device
+  lower, as far as refusing every set it made. That forces a rebuild on each
+  copy that applied more. The harm is availability, not integrity: the fence
+  is signed, it can let no set in, and it reaches only a device the record
+  holds a Remove of. The device's taken values stand until someone writes
+  over them, and nothing clears them on its own. A stale fencer undoes work
+  the device did concurrently, and a removed device's sets with no fence yet
+  wait.
+- A member can sign a delete of another person's owned row at any time. It
+  waits until the record holds that person's removal, and then it is taken.
+  A copy holds such deletes until that removal comes, and it may never come.
+  The carrier bounds what one member can make it hold.
 
 Within legitimately granted scope, a malicious member/app may still perform
 harmful allowed actions. Narrow rights, resource-local rates/quotas and safe app

@@ -136,7 +136,8 @@ python3 scripts/check.py
 The gate runs fmt and Clippy, the frozen original acceptance assertions
 (`fixtures/contract/`), runtime laws, positive and negative compiler programs,
 compiled behavioral fault plants (each must make its named witness fail),
-independent Python vectors, the production-only example, and isolated native and
+independent Python vectors, the production-only example, the community profile's
+own laws, and isolated native and
 `wasm32-unknown-unknown` production builds with and without `canon`. Test-only
 migration adapters preserve original assertions and signed fixtures; they are
 not production escape hatches. A missing tool or failed command is never skipped.
@@ -156,7 +157,7 @@ not production escape hatches. A missing tool or failed command is never skipped
 |---|---|
 | `src/` | The library. Only `derivation.rs` constructs authority; only `scaffold.rs` constructs the operational proof/witness transitions. |
 | `tests/` | Laws, adversarial cases, reference profiles and compiler (`tests/ui/`) controls. |
-| `community/` | `eudoxia-community`, a profile crate: one interpreter of a group's signed history. |
+| `community/` | `eudoxia-community`, a profile crate: one interpreter of a group's signed history, and the rules that read it (passes, lends, app writes, an app's shared database: `db`). |
 | `integration/` | Separate acceptance package against the [svrngs](https://github.com/alexsbryan/svrngs) native carrier; needs a svrngs checkout. See its README. |
 | `fixtures/` | Frozen acceptance contract and independently produced vectors. |
 | `scripts/` | The gate and independent vector producers. |

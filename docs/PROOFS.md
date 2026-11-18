@@ -218,6 +218,51 @@ an app merely because its descriptor parsed, turn unclassified profile IDs into
 classified native identities, establish native issuance/origin/storage isolation, or make the
 native source interpreter complete. Those remain explicit integration obligations.
 
+### P10. A shared app database's sets end alike on every copy
+
+Model: each device signs change sets at `seq` 0, 1, 2, … in a merged app
+database. A copy holds a record R and a set Φ of fences, each fence
+`(by, d, mark)`. Premise: what the rules read of R is cumulative as R grows.
+That is a key's binding to a person and device kind, and a Remove that took a
+key. The rules never read standing now. A copy applies a taken set, drops a
+refused one for good, and holds one that waits (`community/src/db.rs`).
+
+*Owned rows.* A change to a row whose key's first value is v is taken iff R
+binds the signer to the person whose key is v, as TEXT of exactly its bytes,
+or the change is a delete and R holds a Remove for every key it binds to that
+person. It is refused iff v is not such text, or R binds the signer to
+another person and the change is a write. Otherwise it waits. Each input that
+decides taken or refused is cumulative under the premise, so every taken or
+refused verdict is final as R grows.
+
+*A removed device's sets.* Let C(R, Φ, d) be the fences in Φ for d whose
+signer R binds as a computer, where R holds d's Remove. The cut is
+m = min{mark(f) : f ∈ C}, with none below every seq. A set (d, s) is taken
+iff R holds no Remove of d, or s ≤ m. It is refused iff s > m. It waits while
+R binds d to nobody, or C is empty.
+
+1. **Order.** The verdict reads only (R, Φ, s). A minimum over a set does not
+   depend on the order its members arrived in.
+2. **Refusals are final.** Under the premise, C only grows as R and Φ grow.
+   A minimum over a growing set never rises, so s > m stays true. A copy that
+   dropped a refused set never needs it again.
+3. **Convergence.** Copies that come to hold the same R and Φ have the same m.
+   A copy applied too much only if it applied some s > m. That copy rebuilds
+   from a source that applied nothing past m, and then it holds exactly the
+   sets every copy takes.
+
+Taking a set is not final: a lower fence can arrive later and force a
+rebuild. No rule over unbounded fences makes both verdicts final. The
+maximum makes taking final, but then a refusal is never final, and any one
+fencer could let in sets past the cut. The minimum fails closed: a fencer
+can only refuse more of a removed device's sets. Choosing it costs
+availability, never integrity. A fence that names a device R holds no Remove
+of waits. So no fence reaches a device that stands.
+
+Limit: the record's own disputed cases, such as a fork that takes a binding
+or a cut back, fall outside the premise. They are settled by P5/P6, not
+here.
+
 ## 3. Analytic limits and the choices they force
 
 ### I1. Hidden distributed history cannot supply a global negative fact offline
@@ -431,6 +476,7 @@ The acceptance behaviors are listed in `CONTRACT.md`.
 | Selected code and acceptance | P4/P5/P6 plus application activation/acceptance ownership and immutable selected content |
 | Records and reports | P3/P4 and caller-scoped rendering; a report is not a proof constructor |
 | Read-grant history versus delegated writes | I1 first forces the private-authority/scope/availability choice; the selected protocol must then preserve P1–P7 |
+| An app database's owned rows and a removed device's sets | P10 plus the carrier's correspondence: it judges every change row and set it applies, it keeps its fences through a rebuild, and it resends only from a copy within the cut |
 
 ## 5. Assurance and the next feature
 

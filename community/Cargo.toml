@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 license = "AGPL-3.0-or-later"
-description = "Eudoxia's community profile: one interpreter of group history, and the rules for passes, lends and what apps write. Pure Rust, no_std + alloc."
+description = "Eudoxia's community profile: one interpreter of group history, and the rules for passes, lends, what apps write, and what counts in an app's shared database. Pure Rust, no_std + alloc."
 
 # Its own root, like integration/: the kernel's manifest stays untouched.
 [workspace]

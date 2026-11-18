@@ -20,6 +20,14 @@ commands = [
     ["cargo", "run", "--locked", "--example", "owned_resource"],
     [sys.executable, "scripts/check_extensions.py"],
 ]
+# The community profile is its own package root, so `--all` above never reaches it.
+community = ["--manifest-path", "community/Cargo.toml"]
+commands += [
+    ["cargo", "fmt", *community, "--all", "--check"],
+    ["cargo", "clippy", *community, "--locked", "--all-targets", "--", "-D", "warnings"],
+    ["cargo", "test", *community, "--locked"],
+    ["cargo", "check", *community, "--locked", "--lib", "--target", "wasm32-unknown-unknown"],
+]
 for target in [[], ["--target", "wasm32-unknown-unknown"]]:
     for features in [["--no-default-features"], ["--all-features"]]:
         commands.append(["cargo", "check", "--locked", "--lib", *features, *target])

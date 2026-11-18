@@ -69,6 +69,13 @@ cases += [
     ("stream checks retain the original slot", "tests/svrngs_use_lifecycle.rs", "s.checks += 1;", "s.checks += 1; s.stage = Stage::Closed;", "svrngs_use_lifecycle", "a_post_is_forwarded_once_and_idle_checks_keep_one_original_slot"),
     ("future-only Stop is not active cancellation", "tests/svrngs_use_lifecycle.rs", "Stage::Streaming(*use_id) {\n                    FactState::Established", "Stage::Streaming(*use_id) {\n                    match inputs.choice {Choice::Yes => FactState::Established,Choice::Stop => FactState::Refused(Reason::Profile(id(\"stopped\")))}", "svrngs_use_lifecycle", "the_existing_future_only_stop_rule_is_not_silently_changed_to_cancellation"),
     ("reservation resource identity", "tests/svrngs_use_lifecycle.rs", "Rc::ptr_eq(&self.owner.service, &owner.service)\n            && self.owner.resource == owner.resource\n            && ", "", "svrngs_use_lifecycle", "a_pending_reservation_for_another_lend_cannot_satisfy_this_lends_condition"),
+    # The community profile's own package (community/), run from a copy of it.
+    ("another person's owned row is not written", "community/src/db.rs", "Change::Write => Verdict::Refused(Why::NotTheirs),", "Change::Write => Verdict::Taken,", "db", "an_owned_row_changes_only_by_its_person_s_devices"),
+    ("an owned row's key is text of exact bytes", "community/src/db.rs", "(key.kind == Type::Text).then(", "true.then(", "db", "a_key_is_its_person_s_only_as_text_of_exactly_its_bytes"),
+    ("a standing person's row is not deleted", "community/src/db.rs", "Change::Delete if gone(record, owner) => Verdict::Taken,", "Change::Delete => Verdict::Taken,", "db", "a_removed_person_s_rows_take_deletes_from_any_member"),
+    ("a set past its device's fence is refused", "community/src/db.rs", "Self::At(mark) if Some(seq) <= mark => Verdict::Taken,", "Self::At(_) => Verdict::Taken,", "db", "a_removed_device_s_sets_count_up_to_its_lowest_fence"),
+    ("fences in any order make one cut", "community/src/db.rs", ".map(|f| f.mark).min();", ".map(|f| f.mark).next();", "db", "every_order_of_the_remove_fences_and_sets_ends_alike"),
+    ("a refusal past the cut is final", "community/src/db.rs", ".map(|f| f.mark).min();", ".map(|f| f.mark).max();", "db", "every_order_of_the_remove_fences_and_sets_ends_alike"),
 ]
 
 integration = sys.argv[1:] == ["--integration"]
@@ -89,6 +96,9 @@ for label, name, needle, replacement, suite, test in cases:
             shutil.copy2(root / name_to_copy, work / name_to_copy)
         for directory in ["src", "tests", "fixtures/vectors"]:
             shutil.copytree(root / directory, work / directory)
+        community = name.startswith("community/")
+        if community:
+            shutil.copytree(root / "community", work / "community", ignore=shutil.ignore_patterns("target"))
         if integration:
             shutil.copytree(root / "integration", work / "integration", ignore=shutil.ignore_patterns("target"))
             manifest=work / "integration/Cargo.toml"
@@ -101,7 +111,8 @@ for label, name, needle, replacement, suite, test in cases:
         env = dict(os.environ, CARGO_TARGET_DIR=str(root / "target/extension-plants"))
         target = ["--lib"] if suite == "lib" else ["--test", suite]
         features = ["--features", "canon"] if suite == "canon_sources" else ["--no-default-features"]
-        manifest = ["--manifest-path", str(work / "integration/Cargo.toml")] if integration else []
+        package = "integration" if integration else "community" if community else None
+        manifest = ["--manifest-path", str(work / package / "Cargo.toml")] if package else []
         run = subprocess.run(["cargo", "test", "--offline", "--locked", *manifest, *features, *target, test, "--", "--exact"],
                              cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
         output = run.stdout.decode(errors="replace")

@@ -11,11 +11,17 @@
 //!   took this connection: carry it, or why it is held.
 //!
 //! A socket is approved by its id where the system gives it one that no
-//! later socket gets while it runs (Linux's cookie), else by the processes
-//! holding it, each named by its id and start, which no later process
-//! shares (a Mac's). The carrier reaches it at this computer's own address
-//! of a family it takes (`Approved::at`), and only the sockets that take
-//! what is sent there are judged: one on another address gets none of it.
+//! later socket gets while it runs (Linux's cookie, a Mac's TCP generation
+//! count), else by the processes holding it, each named by its id and
+//! start, which no later process shares (a Mac's UDP). What took a
+//! connection is judged by the cgroup its server end was made in where a
+//! socket carries one (Linux's), else by the processes holding the socket:
+//! so a socket whose id lasts and that carries no cgroup is approved by its
+//! id, with its holders kept beside it to judge what takes from it, and a
+//! socket its holder makes later is not the one approved. The carrier
+//! reaches it at this computer's own address of a family it takes
+//! (`Approved::at`), and only the sockets that take what is sent there are
+//! judged: one on another address gets none of it.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
@@ -28,9 +34,11 @@ pub type Process = (u32, u64);
 /// One socket on a lend's port, as read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Socket {
-    /// Linux's cookie; a Mac's handle, which names it in this read alone.
+    /// Linux's cookie or a Mac's TCP generation count, which last; a Mac's
+    /// UDP handle, which names it in this read alone.
     pub id: u64,
-    /// The cgroup it was made in, where one is read (Linux).
+    /// The cgroup it was made in, where one is read (Linux). Where none is,
+    /// what takes a connection from it is judged by its holders.
     pub cgroup: Option<u64>,
     /// The processes holding it, where they were read.
     pub holders: BTreeSet<Process>,
@@ -43,8 +51,8 @@ pub struct Socket {
 /// A lend's port as read once: the sockets on it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Read {
-    /// The boot the ids belong to, where they last for one (Linux): the
-    /// first 64 bits of its id.
+    /// The boot the ids belong to, where they last for one: a value no
+    /// other boot of this computer gives (Linux's boot id's first 64 bits).
     pub boot: Option<u64>,
     /// Whether a socket's id is never another's while the system runs.
     pub lasting: bool,
@@ -54,10 +62,12 @@ pub struct Read {
     pub unlisted: bool,
 }
 
-/// What a person approved for a lend: the sockets, or the processes
-/// holding them, the cgroups they were made in, and the address the
-/// carrier reaches them at. Kept as its fields, each set only where it
-/// holds any; a field it doesn't know is refused.
+/// What a person approved for a lend: the sockets, by their ids where
+/// those last; the processes holding them, where an id names a socket in
+/// one read alone or the socket carries no cgroup; the cgroups they were
+/// made in; and the address the carrier reaches them at. Kept as its
+/// fields, each set only where it holds any; a field it doesn't know is
+/// refused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Approved {
@@ -138,7 +148,11 @@ pub enum Held {
 
 /// What `read` approves, with `chosen` when the person chose a process:
 /// the sockets that take what is sent to 127.0.0.1 when one does, else ::1
-/// ([`on`]), each held by it or a child of it.
+/// ([`on`]), each held by it or a child of it. Each is kept by its id where
+/// ids last, and by the processes holding it where its id names it in this
+/// read alone or it carries no cgroup: both, for a socket whose id lasts
+/// with no cgroup, the id to know it and the holders to judge what takes a
+/// connection from it.
 pub fn approve(read: &Read, chosen: Option<&Chosen>) -> Result<Approved, Refused> {
     let Some(first) = read.sockets.first() else {
         return Err(if read.unlisted {
@@ -170,7 +184,8 @@ pub fn approve(read: &Read, chosen: Option<&Chosen>) -> Result<Approved, Refused
         }
     }
     let lasting = on.iter().filter(|_| read.lasting);
-    let named = on.iter().filter(|_| !read.lasting);
+    // Without a cgroup, the holders are what an acceptor is judged by.
+    let named = on.iter().filter(|s| !read.lasting || s.cgroup.is_none());
     Ok(Approved {
         boot: read.boot,
         sockets: lasting.map(|s| s.id).collect(),
@@ -206,11 +221,13 @@ fn descends(pid: u32, from: u32, parents: &BTreeMap<u32, u32>) -> bool {
 /// Whether a connection `took` may be carried, by what is `approved` and
 /// what takes what is sent to its address `now` ([`on`]): nothing not
 /// approved seen since; the same boot; at least one socket there, every one
-/// approved, by its id or a process holding it; and what took it the
-/// approved cgroup, an approved process or one it started, or the listener
-/// its handshake reached, among them. A socket there that isn't approved is
-/// another's when it is read by its id or held by a process read, and
-/// unjudged when neither: a Mac's, whose last user has exited.
+/// approved, by its id where ids last, else by a process holding it; and
+/// what took it the approved cgroup, an approved process or one it started,
+/// or the listener its handshake reached, among them. Where ids last, a
+/// socket is approved by its id alone: one an approved process makes later
+/// is not. A socket there that isn't approved is another's when it is read
+/// by its id or held by a process read, and unjudged when neither: a Mac's,
+/// whose last user has exited.
 pub fn check(approved: Option<&Approved>, now: &Read, took: &Took) -> Result<(), Held> {
     let approved = approved.ok_or(Held::Unapproved)?;
     if approved.held || approved.boot != now.boot {
@@ -218,7 +235,8 @@ pub fn check(approved: Option<&Approved>, now: &Read, took: &Took) -> Result<(),
     }
     let on = on(now, approved.at);
     let by_id = |s: &Socket| now.lasting && approved.sockets.contains(&s.id);
-    let ok = |s: &&Socket| by_id(s) || !s.holders.is_disjoint(&approved.processes);
+    let by_holder = |s: &Socket| !now.lasting && !s.holders.is_disjoint(&approved.processes);
+    let ok = |s: &&Socket| by_id(s) || by_holder(s);
     // Whether each unapproved socket there was seen: read by its id, or
     // held by a process read.
     let unapproved = on.iter().filter(|s| !ok(s));

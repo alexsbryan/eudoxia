@@ -3,7 +3,7 @@
 //! connection is carried only to what was approved; and missing, stale or
 //! mismatched evidence is refused. Each law names the plants it went red on.
 use eudoxia_community::binding::{
-    Chosen, Held, Process, Read, Refused, Socket, Took, approve, check,
+    Approved, Chosen, Held, Process, Read, Refused, Socket, Took, approve, check,
 };
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -44,6 +44,17 @@ fn mac(sockets: Vec<Socket>, unlisted: bool) -> Read {
         lasting: false,
         sockets,
         unlisted,
+    }
+}
+
+/// A Mac's TCP read: generation counts, which last, in boot 9, and no
+/// cgroup.
+fn counted(sockets: Vec<Socket>) -> Read {
+    Read {
+        boot: Some(9),
+        lasting: true,
+        sockets,
+        unlisted: false,
     }
 }
 
@@ -469,4 +480,285 @@ fn a_dial_address_no_approved_socket_covers_is_refused() {
     let lan: IpAddr = "192.168.1.5".parse().unwrap();
     let refused = approve(&mac(vec![held_at("192.168.1.5")], false), None);
     assert_eq!(refused, Err(Refused::Elsewhere(lan)));
+}
+
+/// **A socket whose id lasts and that carries no cgroup is approved by its
+/// id, with the processes holding it, by which what took a connection is
+/// judged**: a Mac's TCP read with lasting ids keeps both; that socket,
+/// taken by an approved process, by a prefork's worker started since, or by
+/// a Node cluster's worker its primary handed the connection, carries; a new
+/// socket from the same process, alone or beside it, a restart, another
+/// account's acceptor and another boot are held. Plants: the holders not
+/// kept where ids last; a socket judged by its holders where ids last;
+/// another socket's id carried; the boot not compared; the acceptor alone
+/// compared, not its parents; the acceptor not compared.
+#[test]
+fn a_lasting_socket_with_no_cgroup_is_approved_by_its_id_and_its_acceptor_by_its_holders() {
+    // The primary 100 holds the listener, counted 40, and so does its worker.
+    let listener = counted(vec![socket(40, None, &[(100, 1), (101, 2)])]);
+    let primary = chosen(100, 1, Some(1), &[(101, 100), (100, 1)]);
+    let approved = approve(&listener, Some(&primary)).unwrap();
+    assert_eq!(approved.sockets, [40].into(), "by its id");
+    let holders = [(100, 1), (101, 2)].into();
+    assert_eq!(approved.processes, holders, "with its holders");
+    assert_eq!(approved.boot, Some(9));
+    let took = |now: &Read, up: &[Process]| {
+        let took = Took::Lineage(up.to_vec());
+        check(Some(&approved), now, &took)
+    };
+    let worker = [(101, 2), (100, 1)];
+    assert_eq!(took(&listener, &worker), Ok(()), "a worker approved");
+    let since = counted(vec![socket(40, None, &[(100, 1), (102, 5)])]);
+    let worker = [(102, 5), (100, 1)];
+    assert_eq!(took(&since, &worker), Ok(()), "a worker started since");
+    let handed = [(103, 6), (100, 1), (1, 1)];
+    assert_eq!(took(&listener, &handed), Ok(()), "a cluster's worker");
+    let next = counted(vec![socket(41, None, &[(100, 1)])]);
+    let same = [(100, 1)];
+    assert_eq!(
+        took(&next, &same),
+        Err(Held::Another),
+        "a new socket, the same process"
+    );
+    let beside = counted(vec![
+        socket(40, None, &[(100, 1)]),
+        socket(41, None, &[(100, 1)]),
+    ]);
+    assert_eq!(
+        took(&beside, &same),
+        Err(Held::Another),
+        "a new socket beside it, the same process"
+    );
+    let restarted = counted(vec![socket(42, None, &[(100, 7)])]);
+    let again = [(100, 7), (1, 1)];
+    assert_eq!(took(&restarted, &again), Err(Held::Another), "a restart");
+    let theirs = [(500, 8), (1, 1)];
+    assert_eq!(
+        took(&listener, &theirs),
+        Err(Held::Another),
+        "another account's acceptor"
+    );
+    let rebooted = Read {
+        boot: Some(10),
+        ..listener.clone()
+    };
+    assert_eq!(took(&rebooted, &same), Err(Held::Another), "another boot");
+}
+
+/// Ten sockets, each read a way the others aren't, made in cgroup 4 or 5
+/// where `cgroups` are read.
+fn ten(cgroups: bool) -> Vec<Socket> {
+    let rows: [(u64, u64, &[Process], &str, bool); 10] = [
+        (1, 4, &[(100, 1)], "127.0.0.1", false),
+        (2, 4, &[(101, 2)], "0.0.0.0", false),
+        (3, 5, &[(200, 3)], "127.0.0.1", false),
+        (4, 4, &[], "127.0.0.1", false),
+        (5, 4, &[(100, 1)], "::", true),
+        (6, 5, &[(100, 1)], "::", false),
+        (7, 4, &[(100, 4)], "192.168.1.5", false),
+        (1, 5, &[(200, 3)], "127.0.0.1", false),
+        (8, 4, &[(100, 1), (101, 2)], "::1", false),
+        (9, 4, &[(100, 1)], "127.0.0.2", false),
+    ];
+    let socket = |&(id, cgroup, holders, at, dual): &(u64, u64, &[Process], &str, bool)| Socket {
+        id,
+        cgroup: cgroups.then_some(cgroup),
+        holders: holders.iter().copied().collect(),
+        at: at.parse().unwrap(),
+        dual,
+    };
+    rows.iter().map(socket).collect()
+}
+
+/// Every read of none, one or two of `sockets`, in `boot`.
+fn every(sockets: &[Socket], boot: Option<u64>, lasting: bool) -> Vec<Read> {
+    let mut each = vec![vec![]];
+    each.extend(sockets.iter().map(|s| vec![s.clone()]));
+    for one in sockets {
+        each.extend(sockets.iter().map(|other| vec![one.clone(), other.clone()]));
+    }
+    let read = |sockets| Read {
+        boot,
+        lasting,
+        sockets,
+        unlisted: false,
+    };
+    each.into_iter().map(read).collect()
+}
+
+/// **A read judged as before decides as before**: on every read of up to
+/// two of ten sockets, with their cgroups and lasting ids in a boot (Linux's)
+/// or with ids of one read alone and no boot (a Mac's UDP), listed or not,
+/// approve decides as [`before`] did for each process chosen, and check
+/// decides as it did on each approval it made, held or not, in that boot or
+/// another, whatever took the connection. On a read whose ids last with no
+/// cgroup read, check decides as it did on what Linux says took a
+/// connection, over the approval each makes. Plants: the holders kept of a
+/// socket with its cgroup; a socket whose id names it in one read not
+/// judged by its holders.
+#[test]
+fn a_read_judged_as_before_decides_as_before() {
+    let chosens = [
+        None,
+        Some(chosen(100, 1, Some(1), &[(101, 100), (100, 1)])),
+        Some(chosen(100, 1, Some(2), &[])),
+        Some(chosen(200, 3, Some(3), &[])),
+    ];
+    let tooks = [
+        Took::Datagram,
+        Took::Waiting,
+        Took::Cgroup(4),
+        Took::Cgroup(5),
+        Took::Lineage(vec![(101, 2), (100, 1)]),
+        Took::Lineage(vec![(100, 1)]),
+        Took::Lineage(vec![(200, 3), (1, 1)]),
+        Took::Lineage(vec![(100, 4)]),
+        Took::Lineage(vec![]),
+    ];
+    let shapes = [
+        (every(&ten(true), Some(7), true), vec![Some(7), Some(8)]),
+        (every(&ten(false), None, false), vec![None]),
+    ];
+    for (reads, boots) in &shapes {
+        let mut approvals = vec![None];
+        for unlisted in [false, true] {
+            for read in reads {
+                let read = Read {
+                    unlisted,
+                    ..read.clone()
+                };
+                for chosen in &chosens {
+                    let was = before::approve(&read, chosen.as_ref());
+                    let is = approve(&read, chosen.as_ref());
+                    assert_eq!(is, was, "approving {read:?}, {chosen:?} chosen");
+                    for held in [false, true] {
+                        let approved = was.clone().ok().map(|a| Approved { held, ..a });
+                        if approved.is_some() && !approvals.contains(&approved) {
+                            approvals.push(approved);
+                        }
+                    }
+                }
+            }
+        }
+        for approved in &approvals {
+            for (read, boot) in reads.iter().flat_map(|r| boots.iter().map(move |b| (r, b))) {
+                let now = Read {
+                    boot: *boot,
+                    ..read.clone()
+                };
+                for took in &tooks {
+                    let was = before::check(approved.as_ref(), &now, took);
+                    let is = check(approved.as_ref(), &now, took);
+                    assert_eq!(is, was, "{approved:?} checked on {now:?}, {took:?}");
+                }
+            }
+        }
+    }
+    let no_cgroup = every(&ten(false), Some(7), true);
+    let linux = [Took::Datagram, Took::Waiting, Took::Cgroup(4)];
+    for read in &no_cgroup {
+        for chosen in &chosens {
+            let was = before::approve(read, chosen.as_ref());
+            let is = approve(read, chosen.as_ref());
+            assert_eq!(is.as_ref().err(), was.as_ref().err(), "approving {read:?}");
+            let (Ok(is), Ok(was)) = (is, was) else {
+                continue;
+            };
+            for now in &no_cgroup {
+                for took in &linux {
+                    let checked = check(Some(&is), now, took);
+                    let had = before::check(Some(&was), now, took);
+                    assert_eq!(checked, had, "{was:?} checked on {now:?}, {took:?}");
+                }
+            }
+        }
+    }
+}
+
+/// `approve` and `check` as they stood before a socket whose id lasts was
+/// kept with its holders where it carries no cgroup, word for word: what
+/// [`a_read_judged_as_before_decides_as_before`] holds them to.
+mod before {
+    use eudoxia_community::binding::{
+        Approved, Chosen, Held, Process, Read, Refused, Socket, Took,
+    };
+    use std::collections::BTreeMap;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    pub fn approve(read: &Read, chosen: Option<&Chosen>) -> Result<Approved, Refused> {
+        let Some(first) = read.sockets.first() else {
+            return Err(if read.unlisted {
+                Refused::NotYours
+            } else {
+                Refused::Nothing
+            });
+        };
+        let mine = [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ];
+        let at = mine
+            .into_iter()
+            .find(|to| !on(read, *to).is_empty())
+            .ok_or(Refused::Elsewhere(first.at))?;
+        let on = on(read, at);
+        if let Some(chosen) = chosen {
+            if chosen.now != Some(chosen.start) {
+                return Err(Refused::Stopped);
+            }
+            let within = |&(pid, _): &Process| descends(pid, chosen.pid, &chosen.parents);
+            if !on.iter().all(|s| s.holders.iter().any(within)) {
+                return Err(Refused::Another);
+            }
+        }
+        let lasting = on.iter().filter(|_| read.lasting);
+        let named = on.iter().filter(|_| !read.lasting);
+        Ok(Approved {
+            boot: read.boot,
+            sockets: lasting.map(|s| s.id).collect(),
+            cgroups: on.iter().filter_map(|s| s.cgroup).collect(),
+            processes: named.flat_map(|s| s.holders.iter().copied()).collect(),
+            at,
+            held: false,
+        })
+    }
+
+    fn on(read: &Read, to: IpAddr) -> Vec<&Socket> {
+        let takes = |s: &&Socket| {
+            let at = s.at.to_canonical();
+            let every = at.is_ipv4() == to.is_ipv4() || s.dual && to.is_ipv4();
+            at == to || at.is_unspecified() && every
+        };
+        read.sockets.iter().filter(takes).collect()
+    }
+
+    fn descends(pid: u32, from: u32, parents: &BTreeMap<u32, u32>) -> bool {
+        let up = |at: &u32| parents.get(at).copied().filter(|parent| parent != at);
+        core::iter::successors(Some(pid), up)
+            .take(parents.len() + 1)
+            .any(|at| at == from)
+    }
+
+    pub fn check(approved: Option<&Approved>, now: &Read, took: &Took) -> Result<(), Held> {
+        let approved = approved.ok_or(Held::Unapproved)?;
+        if approved.held || approved.boot != now.boot {
+            return Err(Held::Another);
+        }
+        let on = on(now, approved.at);
+        let by_id = |s: &Socket| now.lasting && approved.sockets.contains(&s.id);
+        let ok = |s: &&Socket| by_id(s) || !s.holders.is_disjoint(&approved.processes);
+        let unapproved = on.iter().filter(|s| !ok(s));
+        let seen = unapproved.map(|s| now.lasting || !s.holders.is_empty());
+        match seen.max() {
+            _ if on.is_empty() => Err(Held::Empty),
+            Some(true) => Err(Held::Another),
+            Some(false) => Err(Held::Unjudged),
+            None => match took {
+                Took::Datagram | Took::Waiting => Ok(()),
+                Took::Cgroup(cgroup) if approved.cgroups.contains(cgroup) => Ok(()),
+                Took::Lineage(up) if up.iter().any(|p| approved.processes.contains(p)) => Ok(()),
+                Took::Cgroup(_) | Took::Lineage(_) => Err(Held::Another),
+            },
+        }
+    }
 }

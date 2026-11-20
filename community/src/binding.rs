@@ -13,10 +13,13 @@
 //! A socket is approved by its id where the system gives it one that no
 //! later socket gets while it runs (Linux's cookie), else by the processes
 //! holding it, each named by its id and start, which no later process
-//! shares (a Mac's).
+//! shares (a Mac's). The carrier reaches it at this computer's own address
+//! of a family it takes (`Approved::at`), and only the sockets that take
+//! what is sent there are judged: one on another address gets none of it.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use serde::{Deserialize, Serialize};
 
 /// A process: its id and its start, which no later process shares.
@@ -31,6 +34,10 @@ pub struct Socket {
     pub cgroup: Option<u64>,
     /// The processes holding it, where they were read.
     pub holders: BTreeSet<Process>,
+    /// The address it is bound to.
+    pub at: IpAddr,
+    /// On every IPv6 address, it takes IPv4's too: not `IPV6_V6ONLY`.
+    pub dual: bool,
 }
 
 /// A lend's port as read once: the sockets on it.
@@ -45,15 +52,13 @@ pub struct Read {
     /// Something answers on the port that the read can't list: another
     /// account's program, on a Mac.
     pub unlisted: bool,
-    /// Another socket could bind beside those on the port and take its
-    /// datagrams, as a bind beside them, closed at once, showed (Linux UDP).
-    pub shared: bool,
 }
 
 /// What a person approved for a lend: the sockets, or the processes
-/// holding them, and the cgroups they were made in. Kept as its fields,
-/// each set only where it holds any; a field it doesn't know is refused.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// holding them, the cgroups they were made in, and the address the
+/// carrier reaches them at. Kept as its fields, each set only where it
+/// holds any; a field it doesn't know is refused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Approved {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -64,6 +69,12 @@ pub struct Approved {
     pub cgroups: BTreeSet<u64>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub processes: BTreeSet<Process>,
+    /// 127.0.0.1 or ::1, which an approved socket takes.
+    pub at: IpAddr,
+    /// A program not approved was seen there since: held until the person
+    /// approves again, whatever is there by then.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub held: bool,
 }
 
 /// The process a person chose on the port, and what runs now.
@@ -88,10 +99,11 @@ pub enum Refused {
     NotYours,
     /// The process chosen stopped: another has its id, or none does.
     Stopped,
-    /// A socket on the port isn't held by the process chosen or a child.
+    /// A socket there isn't held by the process chosen or a child.
     Another,
-    /// What answers lets other programs bind beside it on the port.
-    Shared,
+    /// No socket on the port takes what is sent to this computer's own
+    /// address; one is on the address given.
+    Elsewhere(IpAddr),
 }
 
 /// What took the connection the carrier made.
@@ -101,9 +113,14 @@ pub enum Took {
     Datagram,
     /// The cgroup its server end carries (Linux).
     Cgroup(u64),
-    /// The sockets the process holding its server end holds, by their ids
-    /// in this read (a Mac).
-    Holding(BTreeSet<u64>),
+    /// The process holding its server end, then its parent and theirs,
+    /// each by its id and start (a Mac).
+    Lineage(Vec<Process>),
+    /// Its server end isn't a socket yet, waiting on the carrier's first
+    /// bytes (Linux's `TCP_DEFER_ACCEPT`): the listener its handshake
+    /// reached makes it, and that listener is among the sockets read,
+    /// listening or bound to the port, while it can make it.
+    Waiting,
 }
 
 /// Why a connection is held.
@@ -111,42 +128,70 @@ pub enum Took {
 pub enum Held {
     /// Nothing is approved for the lend.
     Unapproved,
-    /// Something not approved is on the port, or took the connection.
+    /// A program not approved is there, or took the connection.
     Another,
-    /// Nothing is on the port now.
+    /// A socket there whose holder can't be read now.
+    Unjudged,
+    /// Nothing is there now.
     Empty,
 }
 
 /// What `read` approves, with `chosen` when the person chose a process:
-/// every socket on the port, each held by it or a child of it.
+/// the sockets that take what is sent to 127.0.0.1 when one does, else ::1
+/// ([`on`]), each held by it or a child of it.
 pub fn approve(read: &Read, chosen: Option<&Chosen>) -> Result<Approved, Refused> {
-    if read.sockets.is_empty() {
+    let Some(first) = read.sockets.first() else {
         return Err(if read.unlisted {
             Refused::NotYours
         } else {
             Refused::Nothing
         });
-    }
-    if read.shared {
-        return Err(Refused::Shared);
-    }
+    };
+    let mine = [
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(Ipv6Addr::LOCALHOST),
+    ];
+    let at = mine
+        .into_iter()
+        .find(|to| !on(read, *to).is_empty())
+        .ok_or(Refused::Elsewhere(first.at))?;
+    let on = on(read, at);
+    // A pid@start read before a reboot may name another process after it
+    // (Linux's start counts from the boot): accepted, since a selection is
+    // made on a page the carrier served this boot, and what is approved is
+    // still only the sockets read now.
     if let Some(chosen) = chosen {
         if chosen.now != Some(chosen.start) {
             return Err(Refused::Stopped);
         }
         let within = |&(pid, _): &Process| descends(pid, chosen.pid, &chosen.parents);
-        if !read.sockets.iter().all(|s| s.holders.iter().any(within)) {
+        if !on.iter().all(|s| s.holders.iter().any(within)) {
             return Err(Refused::Another);
         }
     }
-    let lasting = read.sockets.iter().filter(|_| read.lasting);
-    let named = read.sockets.iter().filter(|_| !read.lasting);
+    let lasting = on.iter().filter(|_| read.lasting);
+    let named = on.iter().filter(|_| !read.lasting);
     Ok(Approved {
         boot: read.boot,
         sockets: lasting.map(|s| s.id).collect(),
-        cgroups: read.sockets.iter().filter_map(|s| s.cgroup).collect(),
+        cgroups: on.iter().filter_map(|s| s.cgroup).collect(),
         processes: named.flat_map(|s| s.holders.iter().copied()).collect(),
+        at,
+        held: false,
     })
+}
+
+/// The sockets of `read` that take what is sent to `to`, this computer's
+/// own address of a family: bound to it, or to every address of its family,
+/// or dual, to every IPv6 address. Only these can receive the carrier's
+/// traffic; one on another address neither holds a lend nor is approved.
+fn on(read: &Read, to: IpAddr) -> Vec<&Socket> {
+    let takes = |s: &&Socket| {
+        let at = s.at.to_canonical();
+        let every = at.is_ipv4() == to.is_ipv4() || s.dual && to.is_ipv4();
+        at == to || at.is_unspecified() && every
+    };
+    read.sockets.iter().filter(takes).collect()
 }
 
 /// Whether `pid` is `from` or descends from it, by `parents`, each step a
@@ -159,26 +204,34 @@ fn descends(pid: u32, from: u32, parents: &BTreeMap<u32, u32>) -> bool {
 }
 
 /// Whether a connection `took` may be carried, by what is `approved` and
-/// what is on the port `now`: the same boot; at least one socket, every
-/// one approved, by its id or a process holding it; and what took it the
-/// approved cgroup, or a process holding a socket on the port.
+/// what takes what is sent to its address `now` ([`on`]): nothing not
+/// approved seen since; the same boot; at least one socket there, every one
+/// approved, by its id or a process holding it; and what took it the
+/// approved cgroup, an approved process or one it started, or the listener
+/// its handshake reached, among them. A socket there that isn't approved is
+/// another's when it is read by its id or held by a process read, and
+/// unjudged when neither: a Mac's, whose last user has exited.
 pub fn check(approved: Option<&Approved>, now: &Read, took: &Took) -> Result<(), Held> {
     let approved = approved.ok_or(Held::Unapproved)?;
-    if approved.boot != now.boot {
+    if approved.held || approved.boot != now.boot {
         return Err(Held::Another);
     }
-    if now.sockets.is_empty() {
-        return Err(Held::Empty);
-    }
+    let on = on(now, approved.at);
     let by_id = |s: &Socket| now.lasting && approved.sockets.contains(&s.id);
-    let ok = |s: &Socket| by_id(s) || !s.holders.is_disjoint(&approved.processes);
-    if !now.sockets.iter().all(ok) {
-        return Err(Held::Another);
-    }
-    match took {
-        Took::Datagram => Ok(()),
-        Took::Cgroup(cgroup) if approved.cgroups.contains(cgroup) => Ok(()),
-        Took::Holding(held) if now.sockets.iter().any(|s| held.contains(&s.id)) => Ok(()),
-        Took::Cgroup(_) | Took::Holding(_) => Err(Held::Another),
+    let ok = |s: &&Socket| by_id(s) || !s.holders.is_disjoint(&approved.processes);
+    // Whether each unapproved socket there was seen: read by its id, or
+    // held by a process read.
+    let unapproved = on.iter().filter(|s| !ok(s));
+    let seen = unapproved.map(|s| now.lasting || !s.holders.is_empty());
+    match seen.max() {
+        _ if on.is_empty() => Err(Held::Empty),
+        Some(true) => Err(Held::Another),
+        Some(false) => Err(Held::Unjudged),
+        None => match took {
+            Took::Datagram | Took::Waiting => Ok(()),
+            Took::Cgroup(cgroup) if approved.cgroups.contains(cgroup) => Ok(()),
+            Took::Lineage(up) if up.iter().any(|p| approved.processes.contains(p)) => Ok(()),
+            Took::Cgroup(_) | Took::Lineage(_) => Err(Held::Another),
+        },
     }
 }

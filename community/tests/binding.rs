@@ -5,9 +5,10 @@
 use eudoxia_community::binding::{
     Approved, Chosen, Held, Process, Read, Refused, Socket, Took, approve, check,
 };
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-/// A socket of `id` on 127.0.0.1, made in `cgroup`, held by `holders`.
+/// A socket of `id` on 127.0.0.1, made in `cgroup`, held by `holders`,
+/// connected to nothing.
 fn socket(id: u64, cgroup: Option<u64>, holders: &[Process]) -> Socket {
     let holders = holders.iter().copied().collect();
     Socket {
@@ -16,6 +17,7 @@ fn socket(id: u64, cgroup: Option<u64>, holders: &[Process]) -> Socket {
         holders,
         at: IpAddr::V4(Ipv4Addr::LOCALHOST),
         dual: false,
+        peer: None,
     }
 }
 
@@ -545,6 +547,87 @@ fn a_lasting_socket_with_no_cgroup_is_approved_by_its_id_and_its_acceptor_by_its
     assert_eq!(took(&rebooted, &same), Err(Held::Another), "another boot");
 }
 
+/// **A datagram socket connected to the carrier's own socket for a flow
+/// alone, made in an approved cgroup, is admitted for the flows the carrier
+/// names**: beside the approved socket, one a server makes for a flow on
+/// the same address (pasta's, for rootless Podman), connected to the
+/// carrier's socket for it, in the approved cgroup, is carried, and one for
+/// each flow named; one not connected or whose peer is unread, one
+/// connected elsewhere, one connected to the flow in another cgroup or in
+/// none read, one beside a datagram whose flows aren't named, and one for a
+/// flow not named are held; a Mac's, with no cgroup, is held as before.
+/// Plants: the socket for this flow held; an unconnected socket admitted;
+/// one connected elsewhere admitted; one in another cgroup admitted; one
+/// with no cgroup read admitted; one admitted for a datagram whose flows
+/// aren't named.
+#[test]
+fn a_socket_connected_to_the_carrier_s_flow_in_an_approved_cgroup_is_admitted_for_it() {
+    // pasta's socket on the port, cookie 1 in cgroup 10601; one it makes
+    // for a flow is on the same address, held by the same process.
+    let pasta = |id, cgroup, peer: Option<&str>| Socket {
+        peer: peer.map(|p| p.parse().unwrap()),
+        ..socket(id, cgroup, &[(300, 3)])
+    };
+    let listener = pasta(1, Some(10601), None);
+    let approved = approve(&linux(vec![listener.clone()]), None).unwrap();
+    let one: SocketAddr = "127.0.0.1:45588".parse().unwrap();
+    let two: SocketAddr = "127.0.0.1:45590".parse().unwrap();
+    let flows = |named: &[SocketAddr]| Took::Flow(named.iter().copied().collect());
+    let this = flows(&[one]);
+    let beside = |s: Socket, took: &Took| {
+        let now = linux(vec![listener.clone(), s]);
+        check(Some(&approved), &now, took)
+    };
+    let answering = pasta(4099, Some(10601), Some("127.0.0.1:45588"));
+    assert_eq!(
+        beside(answering.clone(), &this),
+        Ok(()),
+        "its socket for the flow"
+    );
+    let held = |s| beside(s, &this);
+    assert_eq!(
+        held(pasta(4099, Some(10601), None)),
+        Err(Held::Another),
+        "not connected, or its peer unread"
+    );
+    assert_eq!(
+        held(pasta(4099, Some(10601), Some("127.0.0.1:45589"))),
+        Err(Held::Another),
+        "connected elsewhere"
+    );
+    assert_eq!(
+        held(pasta(4099, Some(9), Some("127.0.0.1:45588"))),
+        Err(Held::Another),
+        "connected to the flow, in another cgroup"
+    );
+    assert_eq!(
+        held(pasta(4099, None, Some("127.0.0.1:45588"))),
+        Err(Held::Another),
+        "connected to the flow, no cgroup read"
+    );
+    assert_eq!(
+        beside(answering.clone(), &Took::Datagram),
+        Err(Held::Another),
+        "a datagram whose flows aren't named"
+    );
+    let second = pasta(4100, Some(10601), Some("127.0.0.1:45590"));
+    let both = linux(vec![listener.clone(), answering, second]);
+    let each = check(Some(&approved), &both, &flows(&[one, two]));
+    assert_eq!(each, Ok(()), "a socket for each flow named");
+    let unnamed = check(Some(&approved), &both, &this);
+    assert_eq!(unnamed, Err(Held::Another), "a socket for a flow not named");
+
+    let game = socket(9, None, &[(100, 1)]);
+    let approved = approve(&mac(vec![game.clone()], false), None).unwrap();
+    let connected = Socket {
+        peer: Some(one),
+        ..socket(8, None, &[(200, 3)])
+    };
+    let now = mac(vec![game, connected], false);
+    let mac = check(Some(&approved), &now, &this);
+    assert_eq!(mac, Err(Held::Another), "a Mac's, connected to the flow");
+}
+
 /// Ten sockets, each read a way the others aren't, made in cgroup 4 or 5
 /// where `cgroups` are read.
 fn ten(cgroups: bool) -> Vec<Socket> {
@@ -566,6 +649,7 @@ fn ten(cgroups: bool) -> Vec<Socket> {
         holders: holders.iter().copied().collect(),
         at: at.parse().unwrap(),
         dual,
+        peer: None,
     };
     rows.iter().map(socket).collect()
 }
@@ -593,9 +677,15 @@ fn every(sockets: &[Socket], boot: Option<u64>, lasting: bool) -> Vec<Read> {
 /// decides as it did on each approval it made, held or not, in that boot or
 /// another, whatever took the connection. On a read whose ids last with no
 /// cgroup read, check decides as it did on what Linux says took a
-/// connection, over the approval each makes. Plants: the holders kept of a
-/// socket with its cgroup; a socket whose id names it in one read not
-/// judged by its holders.
+/// connection, over the approval each makes. Each read is judged again
+/// with every socket connected to the carrier's flow: approve, and check on
+/// whatever took the connection but a flow, decide as before; a datagram
+/// on the carrier's flows decides as a datagram did where no socket is
+/// connected, or none carries a cgroup (a Mac's, or lasting ids with none).
+/// Plants: the holders kept of a socket with its cgroup; a socket whose id
+/// names it in one read not judged by its holders; a socket with no cgroup
+/// connected to a flow admitted; a datagram on a flow held where a datagram
+/// was carried.
 #[test]
 fn a_read_judged_as_before_decides_as_before() {
     let chosens = [
@@ -604,29 +694,59 @@ fn a_read_judged_as_before_decides_as_before() {
         Some(chosen(100, 1, Some(2), &[])),
         Some(chosen(200, 3, Some(3), &[])),
     ];
+    // What took a connection, each beside the same as it was stated before.
     let tooks = [
-        Took::Datagram,
-        Took::Waiting,
-        Took::Cgroup(4),
-        Took::Cgroup(5),
-        Took::Lineage(vec![(101, 2), (100, 1)]),
-        Took::Lineage(vec![(100, 1)]),
-        Took::Lineage(vec![(200, 3), (1, 1)]),
-        Took::Lineage(vec![(100, 4)]),
-        Took::Lineage(vec![]),
+        (Took::Datagram, before::Took::Datagram),
+        (Took::Waiting, before::Took::Waiting),
+        (Took::Cgroup(4), before::Took::Cgroup(4)),
+        (Took::Cgroup(5), before::Took::Cgroup(5)),
+        (
+            Took::Lineage(vec![(101, 2), (100, 1)]),
+            before::Took::Lineage(vec![(101, 2), (100, 1)]),
+        ),
+        (
+            Took::Lineage(vec![(100, 1)]),
+            before::Took::Lineage(vec![(100, 1)]),
+        ),
+        (
+            Took::Lineage(vec![(200, 3), (1, 1)]),
+            before::Took::Lineage(vec![(200, 3), (1, 1)]),
+        ),
+        (
+            Took::Lineage(vec![(100, 4)]),
+            before::Took::Lineage(vec![(100, 4)]),
+        ),
+        (Took::Lineage(vec![]), before::Took::Lineage(vec![])),
     ];
+    let flow: SocketAddr = "127.0.0.1:45588".parse().unwrap();
+    let flows = Took::Flow([flow].into());
+    let datagram = before::Took::Datagram;
+    // `read`, and `read` with every socket connected to the carrier's flow.
+    let ways = |read: &Read| {
+        let connected = |s: &Socket| Socket {
+            peer: Some(flow),
+            ..s.clone()
+        };
+        let sockets = read.sockets.iter().map(connected).collect();
+        let joined = Read {
+            sockets,
+            ..read.clone()
+        };
+        [read.clone(), joined]
+    };
     let shapes = [
-        (every(&ten(true), Some(7), true), vec![Some(7), Some(8)]),
-        (every(&ten(false), None, false), vec![None]),
+        (
+            every(&ten(true), Some(7), true),
+            vec![Some(7), Some(8)],
+            true,
+        ),
+        (every(&ten(false), None, false), vec![None], false),
     ];
-    for (reads, boots) in &shapes {
+    for (reads, boots, cgroups) in &shapes {
         let mut approvals = vec![None];
         for unlisted in [false, true] {
-            for read in reads {
-                let read = Read {
-                    unlisted,
-                    ..read.clone()
-                };
+            for read in reads.iter().flat_map(ways) {
+                let read = Read { unlisted, ..read };
                 for chosen in &chosens {
                     let was = before::approve(&read, chosen.as_ref());
                     let is = approve(&read, chosen.as_ref());
@@ -641,21 +761,38 @@ fn a_read_judged_as_before_decides_as_before() {
             }
         }
         for approved in &approvals {
+            let approved = approved.as_ref();
             for (read, boot) in reads.iter().flat_map(|r| boots.iter().map(move |b| (r, b))) {
                 let now = Read {
                     boot: *boot,
                     ..read.clone()
                 };
-                for took in &tooks {
-                    let was = before::check(approved.as_ref(), &now, took);
-                    let is = check(approved.as_ref(), &now, took);
-                    assert_eq!(is, was, "{approved:?} checked on {now:?}, {took:?}");
+                let [alone, joined] = ways(&now);
+                for now in [&alone, &joined] {
+                    for (took, was) in &tooks {
+                        let had = before::check(approved, now, was);
+                        let is = check(approved, now, took);
+                        assert_eq!(is, had, "{approved:?} checked on {now:?}, {took:?}");
+                    }
+                }
+                let had = before::check(approved, &alone, &datagram);
+                let is = check(approved, &alone, &flows);
+                assert_eq!(is, had, "{approved:?} on {alone:?}, a flow, none connected");
+                if !cgroups {
+                    let had = before::check(approved, &joined, &datagram);
+                    let is = check(approved, &joined, &flows);
+                    assert_eq!(is, had, "{approved:?} on {joined:?}, a flow, no cgroup");
                 }
             }
         }
     }
     let no_cgroup = every(&ten(false), Some(7), true);
-    let linux = [Took::Datagram, Took::Waiting, Took::Cgroup(4)];
+    let linux = [
+        (Took::Datagram, before::Took::Datagram),
+        (Took::Waiting, before::Took::Waiting),
+        (Took::Cgroup(4), before::Took::Cgroup(4)),
+        (flows, before::Took::Datagram),
+    ];
     for read in &no_cgroup {
         for chosen in &chosens {
             let was = before::approve(read, chosen.as_ref());
@@ -664,10 +801,10 @@ fn a_read_judged_as_before_decides_as_before() {
             let (Ok(is), Ok(was)) = (is, was) else {
                 continue;
             };
-            for now in &no_cgroup {
-                for took in &linux {
-                    let checked = check(Some(&is), now, took);
-                    let had = before::check(Some(&was), now, took);
+            for now in no_cgroup.iter().flat_map(ways) {
+                for (took, then) in &linux {
+                    let checked = check(Some(&is), &now, took);
+                    let had = before::check(Some(&was), &now, then);
                     assert_eq!(checked, had, "{was:?} checked on {now:?}, {took:?}");
                 }
             }
@@ -676,14 +813,22 @@ fn a_read_judged_as_before_decides_as_before() {
 }
 
 /// `approve` and `check` as they stood before a socket whose id lasts was
-/// kept with its holders where it carries no cgroup, word for word: what
+/// kept with its holders where it carries no cgroup, word for word, over
+/// what took a connection as it was stated then (`Took`, four kinds): what
 /// [`a_read_judged_as_before_decides_as_before`] holds them to.
 mod before {
-    use eudoxia_community::binding::{
-        Approved, Chosen, Held, Process, Read, Refused, Socket, Took,
-    };
+    use eudoxia_community::binding::{Approved, Chosen, Held, Process, Read, Refused, Socket};
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    /// What took a connection, as the carrier stated it then.
+    #[derive(Debug)]
+    pub enum Took {
+        Datagram,
+        Cgroup(u64),
+        Lineage(Vec<Process>),
+        Waiting,
+    }
 
     pub fn approve(read: &Read, chosen: Option<&Chosen>) -> Result<Approved, Refused> {
         let Some(first) = read.sockets.first() else {

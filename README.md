@@ -157,7 +157,7 @@ not production escape hatches. A missing tool or failed command is never skipped
 |---|---|
 | `src/` | The library. Only `derivation.rs` constructs authority; only `scaffold.rs` constructs the operational proof/witness transitions. |
 | `tests/` | Laws, adversarial cases, reference profiles and compiler (`tests/ui/`) controls. |
-| `community/` | `eudoxia-community`, a profile crate: one interpreter of a group's signed history, and the rules that read it (passes, lends, app writes, an app's shared database: `db`). |
+| `community/` | `eudoxia-community`, a profile crate: one interpreter of a group's signed history, and the rules that read it (passes, lends, app writes, an app's shared database: `db`); and which program may receive a lend's traffic (`binding`), over what the carrier read of its port. |
 | `integration/` | Separate acceptance package against the [svrngs](https://github.com/alexsbryan/svrngs) native carrier; needs a svrngs checkout. See its README. |
 | `fixtures/` | Frozen acceptance contract and independently produced vectors. |
 | `scripts/` | The gate and independent vector producers. |

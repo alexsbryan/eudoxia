@@ -100,6 +100,11 @@ cases += [
     ("removal wins: no own removal undone as lines arrive", *dispute, "exits", "no_key_a_person_s_own_remove_took_out_stands_again_as_more_arrives"),
     ("an exit's verdict reads no other exit", "community/src/history.rs", "if matches!(op.act, Act::Remove { .. }) && self.exit(id).is_ok() {", "if false {", "exits", "a_device_its_person_removed_stays_out_after_a_back_dated_remove_of_its_remover"),
     ("the office's cut retracts an exit its signer made", "community/src/history.rs", ".filter(|_| self.allowed_by_cuts(id, cuts, power).is_ok())", "", "exits", "a_keeper_s_cut_holds_against_the_cut_device_s_back_dated_removes"),
+    ("a socket beside the chosen process is not approved", "community/src/binding.rs", "if !read.sockets.iter().all(|s| s.holders.iter().any(within)) {", "if false && !read.sockets.iter().all(|s| s.holders.iter().any(within)) {", "binding", "an_approval_is_the_sockets_read_or_why_none_is"),
+    ("a stopped selection is not approved", "community/src/binding.rs", "if chosen.now != Some(chosen.start) {", "if chosen.now.is_none() {", "binding", "an_approval_is_the_sockets_read_or_why_none_is"),
+    ("another listener's cookie is not carried", "community/src/binding.rs", "let by_id = |s: &Socket| now.lasting && approved.sockets.contains(&s.id);", "let by_id = |_: &Socket| now.lasting;", "binding", "a_connection_is_carried_only_to_what_was_approved"),
+    ("an accept in another cgroup is not carried", "community/src/binding.rs", "Took::Cgroup(cgroup) if approved.cgroups.contains(cgroup) => Ok(()),", "Took::Cgroup(_) => Ok(()),", "binding", "a_connection_is_carried_only_to_what_was_approved"),
+    ("a port others may bind beside is not approved", "community/src/binding.rs", "if read.shared {", "if false {", "binding", "a_port_others_may_bind_beside_is_declined"),
 ]
 
 integration = sys.argv[1:] == ["--integration"]

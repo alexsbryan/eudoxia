@@ -8,6 +8,7 @@
 extern crate alloc;
 
 pub mod app;
+pub mod binding;
 pub mod db;
 mod history;
 pub mod lend;

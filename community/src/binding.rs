@@ -22,7 +22,8 @@
 //! socket a server makes for one of the carrier's flows, connected to the
 //! carrier's own socket for it alone, is admitted for the flows the carrier
 //! names where it was made in an approved cgroup ([`Took::Flow`]); one read
-//! as connected to nothing yet, there, is unjudged until it connects. The
+//! as connected to nothing yet, there, is unjudged until it connects, while
+//! a new flow awaits its socket. The
 //! carrier reaches it at this computer's own address of a family it takes
 //! (`Approved::at`), and only the sockets that take what is sent there are
 //! judged: one on another address gets none of it.
@@ -141,11 +142,17 @@ pub enum Took {
     /// A datagram, which the sockets read alone may receive.
     Datagram,
     /// A datagram on one of the carrier's flows to the lend, each named by
-    /// the address of the carrier's own socket for it: the sockets read
-    /// alone may receive it, and among them a datagram socket connected to
-    /// one of these addresses alone, made in an approved cgroup, is the
-    /// approved program's own, answering that flow (Linux's).
-    Flow(BTreeSet<SocketAddr>),
+    /// the address of the carrier's own socket for it (`named`): the sockets
+    /// read alone may receive it, and among them a datagram socket connected
+    /// to one of these addresses alone, made in an approved cgroup, is the
+    /// approved program's own, answering that flow (Linux's). `new` are those
+    /// among them whose first datagram went out so lately, by the carrier's
+    /// clock, that their server may not have connected its socket for them
+    /// yet.
+    Flow {
+        named: BTreeSet<SocketAddr>,
+        new: BTreeSet<SocketAddr>,
+    },
     /// The cgroup its server end carries (Linux).
     Cgroup(u64),
     /// The process holding its server end, then its parent and theirs,
@@ -258,9 +265,10 @@ fn descends(pid: u32, from: u32, parents: &BTreeMap<u32, u32>) -> bool {
 /// another's when it is read by its id or held by a process read, and
 /// unjudged when neither: a Mac's, whose last user has exited. One read as
 /// connected to nothing, made in an approved cgroup, beside a datagram on
-/// the carrier's flows, is unjudged too: perhaps the approved program's
-/// socket for a flow, made and not yet connected, which the next check
-/// judges by what it is connected to then.
+/// the carrier's flows, is unjudged too while a new flow awaits its
+/// server's socket, one for each such flow: perhaps the approved program's
+/// socket for it, made and not yet connected, which the next check judges
+/// by what it is connected to then. Past those, it is another's.
 pub fn check(approved: Option<&Approved>, now: &Read, took: &Took) -> Result<(), Held> {
     let approved = approved.ok_or(Held::Unapproved)?;
     if approved.held || approved.boot != now.boot {
@@ -269,9 +277,9 @@ pub fn check(approved: Option<&Approved>, now: &Read, took: &Took) -> Result<(),
     let on = on(now, approved.at);
     let by_id = |s: &Socket| now.lasting && approved.sockets.contains(&s.id);
     let by_holder = |s: &Socket| !now.lasting && !s.holders.is_disjoint(&approved.processes);
-    let flows = match took {
-        Took::Flow(flows) => Some(flows),
-        Took::Datagram | Took::Cgroup(_) | Took::Lineage(_) | Took::Waiting => None,
+    let (flows, new) = match took {
+        Took::Flow { named, new } => (Some(named), Some(new)),
+        Took::Datagram | Took::Cgroup(_) | Took::Lineage(_) | Took::Waiting => (None, None),
     };
     let in_approved = |s: &Socket| s.cgroup.is_some_and(|c| approved.cgroups.contains(&c));
     // Connected to the carrier's own socket for a flow, it takes datagrams
@@ -282,10 +290,21 @@ pub fn check(approved: Option<&Approved>, now: &Read, took: &Took) -> Result<(),
         _ => false,
     };
     let ok = |s: &&Socket| by_id(s) || by_holder(s) || answering(s);
+    // New flows still awaiting their server's socket: none there is
+    // connected to one yet.
+    let awaiting = new.into_iter().flatten();
+    let mut spare = awaiting
+        .filter(|f| on.iter().all(|s| s.peer != Peer::To(**f)))
+        .count();
     // Connected to nothing yet, in an approved cgroup, beside a datagram on
-    // the carrier's flows: perhaps the approved program's socket for one,
-    // between its bind and its connect.
-    let connecting = |s: &Socket| flows.is_some() && s.peer == Peer::Unconnected && in_approved(s);
+    // the carrier's flows: perhaps the approved program's socket for a flow
+    // awaiting one, between its bind and its connect, one for each such
+    // flow; past those, another's, as the program made again is.
+    let mut connecting = |s: &Socket| {
+        let awaited = spare > 0 && s.peer == Peer::Unconnected && in_approved(s);
+        spare -= usize::from(awaited);
+        awaited
+    };
     // Whether each unapproved socket there was seen: read by its id, or
     // held by a process read, and not one connecting.
     let unapproved = on.iter().filter(|s| !ok(s));
@@ -295,7 +314,7 @@ pub fn check(approved: Option<&Approved>, now: &Read, took: &Took) -> Result<(),
         Some(true) => Err(Held::Another),
         Some(false) => Err(Held::Unjudged),
         None => match took {
-            Took::Datagram | Took::Flow(_) | Took::Waiting => Ok(()),
+            Took::Datagram | Took::Flow { .. } | Took::Waiting => Ok(()),
             Took::Cgroup(cgroup) if approved.cgroups.contains(cgroup) => Ok(()),
             Took::Lineage(up) if up.iter().any(|p| approved.processes.contains(p)) => Ok(()),
             Took::Cgroup(_) | Took::Lineage(_) => Err(Held::Another),

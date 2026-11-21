@@ -5,6 +5,7 @@
 use eudoxia_community::binding::{
     Approved, Chosen, Held, Peer, Process, Read, Refused, Socket, Took, approve, check,
 };
+use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 /// A socket of `id` on 127.0.0.1, made in `cgroup`, held by `holders`,
@@ -574,7 +575,10 @@ fn a_socket_connected_to_the_carrier_s_flow_in_an_approved_cgroup_is_admitted_fo
     let approved = approve(&linux(vec![listener.clone()]), None).unwrap();
     let one: SocketAddr = "127.0.0.1:45588".parse().unwrap();
     let two: SocketAddr = "127.0.0.1:45590".parse().unwrap();
-    let flows = |named: &[SocketAddr]| Took::Flow(named.iter().copied().collect());
+    let flows = |named: &[SocketAddr]| Took::Flow {
+        named: named.iter().copied().collect(),
+        new: BTreeSet::new(),
+    };
     let this = flows(&[one]);
     let beside = |s: Socket, took: &Took| {
         let now = linux(vec![listener.clone(), s]);
@@ -652,7 +656,10 @@ fn a_socket_unconnected_in_an_approved_cgroup_beside_a_flow_is_unjudged_till_it_
     let listener = pasta(1, Some(10601), Peer::Unconnected);
     let approved = approve(&linux(vec![listener.clone()]), None).unwrap();
     let one: SocketAddr = "127.0.0.1:45588".parse().unwrap();
-    let flow = Took::Flow([one].into());
+    let flow = Took::Flow {
+        named: [one].into(),
+        new: [one].into(),
+    };
     let beside = |s: Socket, took: &Took| {
         let now = linux(vec![listener.clone(), s]);
         check(Some(&approved), &now, took)
@@ -683,6 +690,72 @@ fn a_socket_unconnected_in_an_approved_cgroup_beside_a_flow_is_unjudged_till_it_
     let now = linux(vec![listener, bound, another]);
     let held = check(Some(&approved), &now, &flow);
     assert_eq!(held, Err(Held::Another), "beside another program's");
+}
+
+/// **A socket connected to nothing, in an approved cgroup, beside a flow is
+/// unjudged only for a new flow awaiting its server's socket**: the approved
+/// program made again in its own cgroup listens connected to nothing; beside
+/// no new flow, an old one, or a new one whose server's socket is connected
+/// to it already, it is another's. Beside a new flow awaiting its socket it
+/// is unjudged, and once connected to that flow, carried. One such socket is
+/// unjudged for each flow awaiting, and one past those is another's. Plants:
+/// one unjudged beside a flow none awaits; a new flow awaiting though its
+/// socket is connected; one awaiting flow counted for each such socket.
+#[test]
+fn a_socket_connected_to_nothing_is_unjudged_only_for_a_new_flow_awaiting_one() {
+    let pasta = |id, peer| Socket {
+        peer,
+        ..socket(id, Some(10601), &[(300, 3)])
+    };
+    let listener = pasta(1, Peer::Unconnected);
+    let approved = approve(&linux(vec![listener.clone()]), None).unwrap();
+    let one: SocketAddr = "127.0.0.1:45588".parse().unwrap();
+    let two: SocketAddr = "127.0.0.1:45590".parse().unwrap();
+    let flows = |named: &[SocketAddr], new: &[SocketAddr]| Took::Flow {
+        named: named.iter().copied().collect(),
+        new: new.iter().copied().collect(),
+    };
+    let checked = |sockets: Vec<Socket>, took: &Took| check(Some(&approved), &linux(sockets), took);
+    let again = pasta(4099, Peer::Unconnected);
+    let made_again = |took: &Took| checked(vec![again.clone()], took);
+    assert_eq!(
+        made_again(&flows(&[], &[])),
+        Err(Held::Another),
+        "made again, no flow"
+    );
+    assert_eq!(
+        made_again(&flows(&[one], &[])),
+        Err(Held::Another),
+        "made again, an old flow"
+    );
+    let new = flows(&[one], &[one]);
+    let window = vec![listener.clone(), again.clone()];
+    assert_eq!(
+        checked(window, &new),
+        Err(Held::Unjudged),
+        "a new flow awaiting its socket"
+    );
+    let since = vec![listener.clone(), pasta(4099, Peer::To(one))];
+    assert_eq!(checked(since, &new), Ok(()), "connected to it since");
+    let answered = vec![listener.clone(), pasta(4100, Peer::To(one)), again.clone()];
+    assert_eq!(
+        checked(answered, &new),
+        Err(Held::Another),
+        "its flow answered already"
+    );
+    let more = pasta(4101, Peer::Unconnected);
+    let two_beside = vec![listener.clone(), again.clone(), more.clone()];
+    assert_eq!(
+        checked(two_beside.clone(), &new),
+        Err(Held::Another),
+        "two beside one awaiting"
+    );
+    let both = flows(&[one, two], &[one, two]);
+    assert_eq!(
+        checked(two_beside, &both),
+        Err(Held::Unjudged),
+        "one for each awaiting"
+    );
 }
 
 /// Ten sockets, each read a way the others aren't, made in cgroup 4 or 5
@@ -778,7 +851,10 @@ fn a_read_judged_as_before_decides_as_before() {
         (Took::Lineage(vec![]), before::Took::Lineage(vec![])),
     ];
     let flow: SocketAddr = "127.0.0.1:45588".parse().unwrap();
-    let flows = Took::Flow([flow].into());
+    let flows = Took::Flow {
+        named: [flow].into(),
+        new: BTreeSet::new(),
+    };
     let datagram = before::Took::Datagram;
     // `read`, each socket's peer unread; and `read` with every socket
     // connected to the carrier's flow, and with every one connected to

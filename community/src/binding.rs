@@ -5,8 +5,8 @@
 //! what it read here, and acts on what these decide.
 //!
 //! - [`approve`]: the sockets on the port, each with the processes holding
-//!   it, and the process the person chose, if any: what is approved, or
-//!   why nothing is.
+//!   it, and what the person chose, if anything (a process, or the cgroups
+//!   of a job they granted): what is approved, or why nothing is.
 //! - [`check`]: what was approved, the sockets on the port now, and what
 //!   took this connection: carry it, or why it is held.
 //!
@@ -107,16 +107,23 @@ pub struct Approved {
     pub held: bool,
 }
 
-/// The process a person chose on the port, and what runs now.
+/// What a person chose on the port.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Chosen {
-    pub pid: u32,
-    /// Its start when it was shown to the person.
-    pub start: u64,
-    /// The start of the process with that id now; none when none runs.
-    pub now: Option<u64>,
-    /// Each process's parent, read with the sockets.
-    pub parents: BTreeMap<u32, u32>,
+pub enum Chosen {
+    /// The process a person chose, and what runs now.
+    Process {
+        pid: u32,
+        /// Its start when it was shown to the person.
+        start: u64,
+        /// The start of the process with that id now; none when none runs.
+        now: Option<u64>,
+        /// Each process's parent, read with the sockets.
+        parents: BTreeMap<u32, u32>,
+    },
+    /// The cgroups of a job the person granted, read in the boot of the
+    /// sockets (a systemd unit's subtree, Linux's): every socket on the
+    /// address made in one of them.
+    Cgroups(BTreeSet<u64>),
 }
 
 /// Why nothing is approved.
@@ -180,9 +187,10 @@ pub enum Held {
     Empty,
 }
 
-/// What `read` approves, with `chosen` when the person chose a process:
+/// What `read` approves, with `chosen` when the person chose something:
 /// the sockets that take what is sent to 127.0.0.1 when one does, else ::1
-/// ([`on`]), each held by it or a child of it. Each is kept by its id where
+/// ([`on`]), each held by the process chosen or a child of it, or made in
+/// one of the cgroups chosen. Each is kept by its id where
 /// ids last, and by the processes holding it where its id names it in this
 /// read alone or it carries no cgroup: both, for a socket whose id lasts
 /// with no cgroup, the id to know it and the holders to judge what takes a
@@ -208,13 +216,27 @@ pub fn approve(read: &Read, chosen: Option<&Chosen>) -> Result<Approved, Refused
     // (Linux's start counts from the boot): accepted, since a selection is
     // made on a page the carrier served this boot, and what is approved is
     // still only the sockets read now.
-    if let Some(chosen) = chosen {
-        if chosen.now != Some(chosen.start) {
-            return Err(Refused::Stopped);
+    match chosen {
+        None => {}
+        Some(Chosen::Process {
+            pid,
+            start,
+            now,
+            parents,
+        }) => {
+            if *now != Some(*start) {
+                return Err(Refused::Stopped);
+            }
+            let within = |&(at, _): &Process| descends(at, *pid, parents);
+            if !on.iter().all(|s| s.holders.iter().any(within)) {
+                return Err(Refused::Another);
+            }
         }
-        let within = |&(pid, _): &Process| descends(pid, chosen.pid, &chosen.parents);
-        if !on.iter().all(|s| s.holders.iter().any(within)) {
-            return Err(Refused::Another);
+        Some(Chosen::Cgroups(cgroups)) => {
+            let made = |s: &&Socket| s.cgroup.is_some_and(|c| cgroups.contains(&c));
+            if !on.iter().all(made) {
+                return Err(Refused::Another);
+            }
         }
     }
     let lasting = on.iter().filter(|_| read.lasting);

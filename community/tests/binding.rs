@@ -62,7 +62,7 @@ fn counted(sockets: Vec<Socket>) -> Read {
 }
 
 fn chosen(pid: u32, start: u64, now: Option<u64>, parents: &[(u32, u32)]) -> Chosen {
-    Chosen {
+    Chosen::Process {
         pid,
         start,
         now,
@@ -135,6 +135,66 @@ fn an_approval_is_the_sockets_read_or_why_none_is() {
         Err(Refused::Another),
         "a loop of parents ends"
     );
+}
+
+/// **A job's cgroups chosen approve only every socket made in them**: with
+/// the cgroups of a job the person granted chosen, every socket on the
+/// address made in one of them is approved, whatever holds it, by its
+/// cookie and its cgroup, and check carries what took a connection in
+/// them; a socket on the address made in another cgroup, or in none read,
+/// is refused as another's; one on another address isn't judged; nothing
+/// on the port is refused as nothing. Plants: a socket outside the set
+/// approved; a socket with no cgroup read approved; a socket on another
+/// address judged.
+#[test]
+fn a_job_s_cgroups_chosen_approve_only_every_socket_made_in_them() {
+    let job = Chosen::Cgroups([4, 5].into());
+    let unit = linux(vec![
+        socket(10, Some(4), &[(100, 1)]),
+        socket(11, Some(5), &[]),
+    ]);
+    let approved = approve(&unit, Some(&job)).unwrap();
+    assert_eq!(approved.sockets, [10, 11].into());
+    assert_eq!(approved.cgroups, [4, 5].into());
+    assert!(approved.processes.is_empty(), "approved by cookie");
+    assert_eq!(approved.boot, Some(7));
+    assert_eq!(check(Some(&approved), &unit, &Took::Cgroup(5)), Ok(()));
+    assert_eq!(
+        check(Some(&approved), &unit, &Took::Cgroup(9)),
+        Err(Held::Another),
+        "check judges what took it by the approved cgroups, as before"
+    );
+    let beside = linux(vec![
+        socket(10, Some(4), &[(100, 1)]),
+        socket(12, Some(9), &[(100, 1)]),
+    ]);
+    assert_eq!(
+        approve(&beside, Some(&job)),
+        Err(Refused::Another),
+        "a socket made in another cgroup, held by the same process"
+    );
+    let unread = linux(vec![
+        socket(10, Some(4), &[(100, 1)]),
+        socket(12, None, &[(100, 1)]),
+    ]);
+    assert_eq!(
+        approve(&unread, Some(&job)),
+        Err(Refused::Another),
+        "a socket whose cgroup isn't read"
+    );
+    let elsewhere = linux(vec![
+        socket(10, Some(4), &[(100, 1)]),
+        Socket {
+            cgroup: Some(9),
+            ..bound(12, "192.168.1.5")
+        },
+    ]);
+    assert_eq!(
+        approve(&elsewhere, Some(&job)).map(|a| a.sockets),
+        Ok([10].into()),
+        "only what is on the address"
+    );
+    assert_eq!(approve(&linux(vec![]), Some(&job)), Err(Refused::Nothing));
 }
 
 /// **A connection is carried only to what was approved**: Linux's, every
@@ -950,8 +1010,9 @@ fn a_read_judged_as_before_decides_as_before() {
 }
 
 /// `approve` and `check` as they stood before a socket whose id lasts was
-/// kept with its holders where it carries no cgroup, word for word, over
-/// what took a connection as it was stated then (`Took`, four kinds): what
+/// kept with its holders where it carries no cgroup, word for word but for
+/// the process chosen, named now as [`Chosen::Process`], over what took a
+/// connection as it was stated then (`Took`, four kinds): what
 /// [`a_read_judged_as_before_decides_as_before`] holds them to.
 mod before {
     use eudoxia_community::binding::{Approved, Chosen, Held, Process, Read, Refused, Socket};
@@ -984,11 +1045,17 @@ mod before {
             .find(|to| !on(read, *to).is_empty())
             .ok_or(Refused::Elsewhere(first.at))?;
         let on = on(read, at);
-        if let Some(chosen) = chosen {
-            if chosen.now != Some(chosen.start) {
+        if let Some(Chosen::Process {
+            pid: chosen,
+            start,
+            now,
+            parents,
+        }) = chosen
+        {
+            if *now != Some(*start) {
                 return Err(Refused::Stopped);
             }
-            let within = |&(pid, _): &Process| descends(pid, chosen.pid, &chosen.parents);
+            let within = |&(pid, _): &Process| descends(pid, *chosen, parents);
             if !on.iter().all(|s| s.holders.iter().any(within)) {
                 return Err(Refused::Another);
             }

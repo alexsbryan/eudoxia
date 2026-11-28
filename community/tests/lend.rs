@@ -1,7 +1,9 @@
 //! Laws of who may use a lend: two owners, the lender and the person, each
 //! must permit; a person's stop and a missing yes refuse; a recheck
-//! revokes a use once what let it in stops.
-use eudoxia_community::lend::{self, Admit, Asked, Refusal, Said};
+//! revokes a use once what let it in stops; a pass a key the lend lists
+//! signed opens it only as its own app, to read and send, for no longer
+//! than its entry accepts.
+use eudoxia_community::lend::{self, Admit, Asked, Refusal, Said, Vouch};
 
 /// The Ed25519 base point: a key that reads as one.
 const NODE: [u8; 32] = [
@@ -103,4 +105,133 @@ fn no_key_permits_nothing() {
     none[0] = 2;
     assert!(lend::choose(&none, false, OWN, None, None).is_err());
     assert!(!lend::recheck(&none, OWN, true, None, Some(1)));
+    assert!(lend::vouch(&none, OWN, NOW, vouched()).is_err());
+}
+
+const NOW: i64 = 1_000;
+
+/// A pass a listed key signed for `OWN`, ending 120 s from now, its
+/// entry accepting 120 s, asked to read: what every case below varies.
+fn vouched() -> Vouch<'static> {
+    Vouch {
+        listed: true,
+        app: OWN,
+        linked: false,
+        until: NOW + 120,
+        longest: 120,
+        asked: Asked::Read,
+        removed: (false, false),
+    }
+}
+
+fn vouch(v: Vouch<'_>) -> Result<i64, Refusal> {
+    lend::vouch(&NODE, OWN, NOW, v)
+}
+
+/// A listed key's pass opens the lend to read and to send where its
+/// lender said, until the pass's own end, and no later.
+#[test]
+fn a_listed_key_s_pass_opens_its_lend_to_read_and_send_until_it_ends() {
+    assert_eq!(
+        vouch(vouched()),
+        Ok(NOW + 120),
+        "a read, its end exactly the longest"
+    );
+    let send = Vouch {
+        asked: Asked::Send,
+        until: NOW + 1,
+        ..vouched()
+    };
+    assert_eq!(vouch(send), Ok(NOW + 1), "a declared send, a shorter pass");
+}
+
+/// The entry judging the request is the signer's own: a signer the lend
+/// does not list opens nothing.
+#[test]
+fn a_pass_no_listed_key_signed_is_refused() {
+    let unlisted = Vouch {
+        listed: false,
+        ..vouched()
+    };
+    assert_eq!(vouch(unlisted), Err(Refusal::Unlisted));
+}
+
+/// A pass for another app that lists this lend among its reads does not
+/// open it: the pass must name this lend as its own app.
+#[test]
+fn a_pass_naming_another_app_is_refused_though_it_reads_this_one() {
+    let sideways = Vouch {
+        app: OTHER,
+        ..vouched()
+    };
+    assert_eq!(vouch(sideways), Err(Refusal::Elsewhere));
+}
+
+/// A holder cannot hand a listed key's pass on to another key.
+#[test]
+fn a_pass_a_link_hands_on_is_refused() {
+    let linked = Vouch {
+        linked: true,
+        ..vouched()
+    };
+    assert_eq!(vouch(linked), Err(Refusal::Linked));
+}
+
+/// Removal wins: a key a group held here removed, as the pass's signer
+/// or its holder, is refused on this path too.
+#[test]
+fn a_removed_signer_or_holder_is_refused() {
+    for removed in [(true, false), (false, true), (true, true)] {
+        let out = Vouch {
+            removed,
+            ..vouched()
+        };
+        assert_eq!(vouch(out), Err(Refusal::Removed), "{removed:?}");
+    }
+}
+
+/// The lender, not the signer, bounds how long: a pass ending even a
+/// second past the entry's longest from now is refused.
+#[test]
+fn a_pass_ending_past_the_longest_its_entry_accepts_is_refused() {
+    let hour = Vouch {
+        until: NOW + 3_600,
+        ..vouched()
+    };
+    assert_eq!(vouch(hour), Err(Refusal::Outlasts), "an hour against 120 s");
+    let second = Vouch {
+        until: NOW + 121,
+        ..vouched()
+    };
+    assert_eq!(vouch(second), Err(Refusal::Outlasts), "one second over");
+    let far = Vouch {
+        until: i64::MAX,
+        longest: u32::MAX,
+        ..vouched()
+    };
+    assert_eq!(
+        vouch(far),
+        Err(Refusal::Outlasts),
+        "the longest accepted bounds the farthest pass"
+    );
+}
+
+/// A pass that has lapsed opens nothing, whatever its entry accepts.
+#[test]
+fn a_lapsed_pass_is_refused() {
+    let lapsed = Vouch {
+        until: NOW,
+        ..vouched()
+    };
+    assert_eq!(vouch(lapsed), Err(Refusal::Lapsed));
+}
+
+/// Nothing but a read or a declared send: a write is refused.
+#[test]
+fn a_listed_key_s_pass_never_writes() {
+    let write = Vouch {
+        asked: Asked::Write,
+        ..vouched()
+    };
+    assert_eq!(vouch(write), Err(Refusal::ReadsAndSends));
 }

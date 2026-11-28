@@ -5,7 +5,11 @@
 //! the lend's own may do with it, and whether a use let in still stands; the
 //! person says which apps may use it as them, by their yes or stop. No rule
 //! here reads time but the recheck's, so the others are decided at the
-//! epoch; the recheck at the deciding computer's clock.
+//! epoch; the recheck and a key's vouch at the deciding computer's clock.
+//!
+//! A lend's lender may also list keys it trusts: a pass one of them signed,
+//! naming the lend as its app, opens it to the pass's holder as nobody, a
+//! read or a declared send, until the pass lapses ([`vouch`]).
 //!
 //! The person's word is kept beside the lend on the lender's computer, never
 //! in the record: the carrier reads it there and states it as a fact of the
@@ -69,6 +73,19 @@ pub enum Refusal {
     Unsent,
     /// What let the use in has lapsed or no longer stands.
     Lapsed,
+    /// No key the lend lists signed the pass.
+    Unlisted,
+    /// The pass names another app, and this lend only among what that reads.
+    Elsewhere,
+    /// A link hands the pass on to another key.
+    Linked,
+    /// A group held here removed the pass's signer or its holder.
+    Removed,
+    /// The pass ends later than the longest its listed key's entry accepts.
+    Outlasts,
+    /// A listed key's pass reads the lend and sends where its lender said,
+    /// nothing else.
+    ReadsAndSends,
 }
 
 impl core::fmt::Display for Refusal {
@@ -84,6 +101,12 @@ impl core::fmt::Display for Refusal {
             Self::ReadOnly => "an app only reads it",
             Self::Silent => "its lender did not say what it lends",
             Self::Lapsed => "what let it in has lapsed or no longer stands",
+            Self::Unlisted => "no key this lend lists signed its pass",
+            Self::Elsewhere => "its pass names another app, and this lend only among what that reads",
+            Self::Linked => "a pass a listed key signed is not handed on by a link",
+            Self::Removed => "a group this computer holds removed its key or its pass's signer",
+            Self::Outlasts => "its pass lasts longer than this lend's lender accepts",
+            Self::ReadsAndSends => "it is lent by key to read and to send to, nothing else",
         })
     }
 }
@@ -96,6 +119,7 @@ enum Use {
     Admit,
     Reach,
     Recheck,
+    Vouch,
 }
 
 /// Who says each rule.
@@ -120,13 +144,29 @@ macro_rules! checks {
     };
 }
 checks!(
-    Stopped, Unasked, ReadOnly, Silent, NotRead, Unopened, Unsent, Lapsed, Unstood, Lent, Agrees,
+    Stopped,
+    Unasked,
+    ReadOnly,
+    Silent,
+    NotRead,
+    Unopened,
+    Unsent,
+    Lapsed,
+    Unstood,
+    Unlisted,
+    Elsewhere,
+    Linked,
+    Removed,
+    Outlasts,
+    ReadsAndSends,
+    Lent,
+    Agrees,
 );
 
 impl Check {
     fn rule(self) -> Rule {
         use {By::*, Check::*, Use::*};
-        const EVERY: &[Use] = &[Choose, Admit, Reach, Recheck];
+        const EVERY: &[Use] = &[Choose, Admit, Reach, Recheck, Vouch];
         let (by, verdict, uses, condition): (_, _, &[Use], _) = match self {
             Stopped => (
                 Person,
@@ -188,13 +228,32 @@ impl Check {
             Lapsed => (
                 Lender,
                 Verdict::Forbid,
-                &[Recheck],
+                &[Recheck, Vouch],
                 all([
                     holds("lapses"),
                     not(Condition::Before(Term::Time, term("until"))),
                 ]),
             ),
             Unstood => (Lender, Verdict::Forbid, &[Recheck], not(holds("stands"))),
+            // A pass a key the lend lists signed: its own app, not handed
+            // on, its signer and holder removed by no group held here, no
+            // longer than the entry accepts, and a read or a declared send.
+            Unlisted => (Lender, Verdict::Forbid, &[Vouch], not(holds("listed"))),
+            Elsewhere => (Lender, Verdict::Forbid, &[Vouch], not(holds("its-app"))),
+            Linked => (Lender, Verdict::Forbid, &[Vouch], holds("linked")),
+            Removed => (
+                Lender,
+                Verdict::Forbid,
+                &[Vouch],
+                any([holds("signer-removed"), holds("holder-removed")]),
+            ),
+            Outlasts => (
+                Lender,
+                Verdict::Forbid,
+                &[Vouch],
+                Condition::Before(term("latest"), term("until")),
+            ),
+            ReadsAndSends => (Lender, Verdict::Forbid, &[Vouch], holds("write")),
             Lent => (Lender, Verdict::Permit, EVERY, Condition::All(Vec::new())),
             Agrees => (Person, Verdict::Permit, EVERY, Condition::All(Vec::new())),
         };
@@ -234,6 +293,12 @@ fn judged<T>(
         Some(Check::Unopened) => Refusal::Unopened,
         Some(Check::Unsent) => Refusal::Unsent,
         Some(Check::Lapsed | Check::Unstood) => Refusal::Lapsed,
+        Some(Check::Unlisted) => Refusal::Unlisted,
+        Some(Check::Elsewhere) => Refusal::Elsewhere,
+        Some(Check::Linked) => Refusal::Linked,
+        Some(Check::Removed) => Refusal::Removed,
+        Some(Check::Outlasts) => Refusal::Outlasts,
+        Some(Check::ReadsAndSends) => Refusal::ReadsAndSends,
         _ if use_ == Use::Recheck => Refusal::Lapsed,
         _ => Refusal::Unasked,
     };
@@ -356,4 +421,53 @@ pub fn recheck(
         (Some(_), None) => return false,
     };
     judged(node, Use::Recheck, label, at, facts, || ()).is_ok()
+}
+
+/// What the carrier states of a pass presented for a lend whose signer it
+/// looked up among the keys the lend's lender lists: each a fact the pass
+/// or the lend's declaration holds, or what this computer's groups say.
+/// The pass's own rules (signed by its signer, held by the key presenting
+/// it, for this lend, not lapsed) are judged apart, as every pass's are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Vouch<'a> {
+    /// The pass's signer is a key the lend's declaration lists.
+    pub listed: bool,
+    /// The app the pass names.
+    pub app: &'a str,
+    /// A link hands the pass on to another key.
+    pub linked: bool,
+    /// When the pass lapses.
+    pub until: i64,
+    /// The longest, in seconds from now, its listed key's entry accepts.
+    pub longest: u32,
+    /// What the request asks of the lend's service.
+    pub asked: Asked,
+    /// Whether a group this computer holds removed the pass's signer, and
+    /// its holder.
+    pub removed: (bool, bool),
+}
+
+/// Whether the pass `vouch` states opens the lend `label` to its holder,
+/// at `now`, the deciding computer's clock: when that admission lapses,
+/// the pass's own end. What it opens carries none of the lender's
+/// credential, so there is no [`Admit`] to answer.
+pub fn vouch(node: &[u8; 32], label: &str, now: i64, vouch: Vouch<'_>) -> Result<i64, Refusal> {
+    let latest = now.saturating_add(i64::from(vouch.longest));
+    let mut facts = Facts::new();
+    let (signer, holder) = vouch.removed;
+    let stated = [
+        ("listed", vouch.listed),
+        ("its-app", vouch.app == label),
+        ("linked", vouch.linked),
+        ("signer-removed", signer),
+        ("holder-removed", holder),
+        ("write", vouch.asked == Asked::Write),
+        ("lapses", true),
+    ];
+    for (name, value) in stated {
+        flag(&mut facts, name, value);
+    }
+    put(&mut facts, "until", Value::Time(vouch.until));
+    put(&mut facts, "latest", Value::Time(latest));
+    judged(node, Use::Vouch, label, now, facts, || vouch.until)
 }

@@ -64,6 +64,18 @@ fn one_request_through_the_rules() {
     timed("a stream's recheck", || {
         lend::recheck(&KEY, own, true, Some(200), Some(100))
     });
+    let vouched = lend::Vouch {
+        listed: true,
+        app: own,
+        linked: false,
+        until: 200,
+        longest: 120,
+        asked: lend::Asked::Read,
+        removed: (false, false),
+    };
+    timed("door: a listed key's pass", || {
+        lend::vouch(&KEY, own, 100, vouched)
+    });
     let write = app::Write {
         node: &KEY,
         group: "the-group",

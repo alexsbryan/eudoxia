@@ -152,6 +152,14 @@ cases += [
     ("unconnected: beside what isn't a datagram on the carrier's flows, not unjudged", "community/src/binding.rs", "let awaited = spare > 0 && s.peer == Peer::Unconnected && in_approved(s);\n        spare -= usize::from(awaited);", "let awaited = (spare > 0 || flows.is_none()) && s.peer == Peer::Unconnected && in_approved(s);\n        spare = spare.saturating_sub(usize::from(awaited));", "binding", "a_socket_unconnected_in_an_approved_cgroup_beside_a_flow_is_unjudged_till_it_connects"),
     ("unconnected: another program beside it is not hidden by it", "community/src/binding.rs", "match seen.max() {", "match seen.min() {", "binding", "a_socket_unconnected_in_an_approved_cgroup_beside_a_flow_is_unjudged_till_it_connects"),
     ("as before: an unconnected socket beside what isn't a flow is another's", "community/src/binding.rs", "let awaited = spare > 0 && s.peer == Peer::Unconnected && in_approved(s);\n        spare -= usize::from(awaited);", "let awaited = (spare > 0 || flows.is_none()) && s.peer == Peer::Unconnected && in_approved(s);\n        spare = spare.saturating_sub(usize::from(awaited));", "binding", "a_read_judged_as_before_decides_as_before"),
+    ('vouch: an unlisted signer is refused', "community/src/lend.rs", 'Forbid, &[Vouch], not(holds("listed"))', 'Forbid, &[Vouch], any([])', "lend", "a_pass_no_listed_key_signed_is_refused"),
+    ('vouch: a pass for another app is refused', "community/src/lend.rs", 'Forbid, &[Vouch], not(holds("its-app"))', 'Forbid, &[Vouch], any([])', "lend", "a_pass_naming_another_app_is_refused_though_it_reads_this_one"),
+    ('vouch: a linked pass is refused', "community/src/lend.rs", 'Forbid, &[Vouch], holds("linked")', 'Forbid, &[Vouch], any([])', "lend", "a_pass_a_link_hands_on_is_refused"),
+    ('vouch: a removed signer is refused', "community/src/lend.rs", 'any([holds("signer-removed"), holds("holder-removed")])', 'any([holds("holder-removed")])', "lend", "a_removed_signer_or_holder_is_refused"),
+    ('vouch: a removed holder is refused', "community/src/lend.rs", 'any([holds("signer-removed"), holds("holder-removed")])', 'any([holds("signer-removed")])', "lend", "a_removed_signer_or_holder_is_refused"),
+    ("vouch: a pass past its entry's longest is refused", "community/src/lend.rs", 'Condition::Before(term("latest"), term("until"))', 'any([])', "lend", "a_pass_ending_past_the_longest_its_entry_accepts_is_refused"),
+    ('vouch: a lapsed pass is refused', "community/src/lend.rs", '&[Recheck, Vouch],', '&[Recheck],', "lend", "a_lapsed_pass_is_refused"),
+    ('vouch: a write is refused', "community/src/lend.rs", 'Forbid, &[Vouch], holds("write")', 'Forbid, &[Vouch], any([])', "lend", "a_listed_key_s_pass_never_writes"),
 ]
 
 integration = sys.argv[1:] == ["--integration"]
